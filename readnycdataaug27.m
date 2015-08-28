@@ -4,11 +4,21 @@
 
 %CONSIDER EXTENDING TO INCLUDE SEPT HEATWAVES AS WELL -- 2010 IS ONE YEAR
 %WHERE THIS WOULD MAKE A CONSIDERABLE DIFFERENCE
-%In addition to the current def'n
+%In addition to the current def'n of a heatwave (3 or more consecutive days
+%where the daily min OR max temp exceeds that station's monthly 90th pctile, 
+%with the net exceedance of the daily min & max temps over the heatwave
+%relative to the 90th pctile calculated as the severity score), an
+%alternative would be to do something like calculate the dist'n of
+%integrated 3-day, 4-day, etc. max & min temps, and then define a heatwave
+%as the longest such stretch over a given period of days where the 90th
+%pctile of the dist'n is exceeded (so e.g. check if 3-day is exceeded, then
+%4-day by extending one day back or forward, etc.) -- because this relies
+%on an integrated measure rather than an instantaneous one, it is somewhat 
+%more robust
 
 %Current runtime: for reading in NCDC data (1973-2013), about 4 min per station (but it is hourly)
 %                 for reading in CLIMOD data (1876-2015), about 2 min total
-%                 for statistics excluding NARR plotting, about 2 min
+%                 for statistics and plotting, about 2 min
 
 
 %`={%`={%`={%`={%`={%`={%`={%`={%`={%`={%`={%`={%`={%`={%`={
@@ -69,7 +79,7 @@ readdataatall=1; %whether data needs to be read again into arrays, or if they're
 readnetcdfdata=0; %whether to read NCDC-derived netCDF files which span 1/1/73-12/31/13 at hourly res
 readfullobsdata=1; %whether to read CLIMOD-derived CSV files which include everything at daily res
 computemainstats=1; %whether to compute main stats (e.g. ranking of heat waves), or move to secondary ones
-histfixed=0; %histograms broken down by month; when fixed, change to 1
+histfixed=0; %whether to display histograms sorted by month; when fixed, change to 1
 
 %Internal and external functions, as well as directories & mathematical constants
 subindex=@(A,r,c) A(r,c);
@@ -767,8 +777,8 @@ for i=1:sz-3 %for a couple-day cushion
 end
 dailymaxregsorted=sortrows(dailymaxregsorted,-1);
 
-%Top 32 days have average max temp >=36.5 C
-numd=32;
+%Top 35 days have average max temp >=36.5 C
+numd=35;
 dmrcc=zeros(numd,numstns); %dailymaxregcitychart
 dmrccnotes=zeros(numd,numstns); %matching matrix with numerical coloring instructions
 for i=1:numd
@@ -799,16 +809,16 @@ for i=1:numd
 end
 %Can't shown 22 stns though, so only show 7 marquee ones minus AtlCityA
 figure(figc);clf;figc=figc+1;
-imagescnan(dmrcc(:,2:numcities+1));colorbar;
-Xt=1:numcities;
+imagescnan(dmrcc(:,2:8));colorbar;
+Xt=1:7;
 Yl=ax(3:4);
-t=text(Xt,numd*ones(1,length(Xt))+1.5,cities(1:numcities,:));
+t=text(Xt,numd*ones(1,length(Xt))+1.5,cities(2:8,:));
 set(t,'HorizontalAlignment','right','VerticalAlignment','bottom', ...
     'Rotation',45,'FontSize',11);
 title('Stn Max Temps on Days with Regional Avg >=36.5 C','FontSize',16,'FontWeight','bold');
 %Add text according to dmrccnotes
 for row=1:24
-    for stnc=ssa:numcities+1
+    for stnc=2:8
         if dmrccnotes(row,stnc)==1
             text(stnc-0.25-(ssa-1),row,'+++++++');
         elseif dmrccnotes(row,stnc)==-1

@@ -4,7 +4,7 @@
 %spatially continuous but has a longer temporal record, 1979-pres vs 2002-pres)
 %Order in spreadsheets doesn't matter because everything will be
 %chronologically sorted at the end anyway
-%Data are for the five severest heatwaves at KNYC (Central Park) contained within the
+%Data are for the severest heatwaves at KNYC (Central Park) contained within the
 %MesoWest record, which begins Aug 15, 2002:
 %(12) Aug 15-19, 2002 (truncated from Aug 10) -- NOW EXCLUDED
 %(15) Jul 18-24, 2011
@@ -53,6 +53,7 @@ hwlengths=zeros(numstns,numhws);hwintegindb=zeros(numstns,numhws);
 %eliminating intra-hourly special readings, etc
 %Also can check for missing times
 %Strangely, some use 24-hr time and others 12-hr
+%Patriotically, the resulting total number of hours in these heatwaves is 1776!
 cd /Users/colin/Desktop/General_Academics/Research/Exploratory_Plots/MesoWest_Hourly_Stn_Obs
 kewr=csvread('KEWR-data.csv');kteb=csvread('KTEB-data.csv');
 knyc=csvread('KNYC-data.csv');klga=csvread('KLGA-data.csv');
@@ -227,7 +228,7 @@ for i=1:numstns
         end
     end
       
-    for jj2=1-reduc:numhws %excluding the hw #1, the truncated one in Aug 2002
+    for jj2=1-reduc:numhws %excluding hw #1, the truncated one in Aug 2002
         wetscoreb(jj2+reduc,1)=hwintegindb(i,jj2);
         wetscorex(jj2+reduc,1)=hwintegindx(i,jj2);wetscoren(jj2+reduc,1)=hwintegindn(i,jj2);
         wetscoreb(jj2+reduc,2)=hwstarts(jj2,1);wetscorex(jj2+reduc,2)=hwstarts(jj2,1);wetscoren(jj2+reduc,2)=hwstarts(jj2,1);
@@ -306,6 +307,64 @@ if makescatterplot==1
         'FontSize',16,'FontWeight','bold');
 end
 
+
+%Average temperatures on regional hot days (the ones analyzed in
+%readnarrdata) that occurred after 2002 (as this is of course using station data from MesoWest)
+%Daily-average temps are calculated from hourly obs
+hoteventsstns={};
+for i=1:1
+%for i=1:numstns
+    eventc=0;hour=1;
+    while hour<=size(cleandata{1},1)
+        match=0;
+        for hotday=1:size(dmrsstarts,1) %the regional hot days between 1979 and 2014, as constrained by NARR
+            if hotday>=2 && eventc>=2
+                %Two days in the same event coming up
+                if dmrsstarts(hotday,2)==dmrsstarts(hotday-1,2) && abs(dmrsstarts(hotday,1)-dmrsstarts(hotday-1,1))<=7 
+                    %dailyavg=0;
+                    %Only do something if there's a match!
+                    if cleandata{i}(hour,1)==DOYtoMonth(dmrsstarts(hotday,1),dmrsstarts(hotday,2)) &&...
+                            cleandata{i}(hour,2)==DOYtoDOM(dmrsstarts(hotday,1),dmrsstarts(hotday,2)) &&...
+                            cleandata{i}(hour,3)==dmrsstarts(hotday,2) %month, day, and year all match
+                        dailyavg=sum(cleandata{i}(hour:hour+47,6));
+                        hourincr=48;match=1;
+                        if eventc>=1;prevdailyavg=dailyavg;end
+                        dailyavg=dailyavg/48;
+                        hoteventsstns{i,eventc-1}=dailyavg;
+                    end
+                %Looking for a singleton day
+                else
+                    dailyavg=0;
+                    %If there's a match...
+                    if cleandata{i}(hour,1)==DOYtoMonth(dmrsstarts(hotday,1),dmrsstarts(hotday,2)) &&...
+                            cleandata{i}(hour,2)==DOYtoDOM(dmrsstarts(hotday,1),dmrsstarts(hotday,2)) &&...
+                            cleandata{i}(hour,3)==dmrsstarts(hotday,2) %month, day, and year all match
+                        dailyavg=sum(cleandata{i}(hour:hour+23,6));
+                        hourincr=24;match=1;
+                        if eventc>=1;prevdailyavg=dailyavg;end
+                        dailyavg=dailyavg/24;
+                        eventc=eventc+1;
+                        hoteventsstns{i,eventc}=dailyavg;
+                    end
+                end
+            else
+                dailyavg=0;
+                if cleandata{i}(hour,1)==DOYtoMonth(dmrsstarts(hotday,1),dmrsstarts(hotday,2)) &&...
+                        cleandata{i}(hour,2)==DOYtoDOM(dmrsstarts(hotday,1),dmrsstarts(hotday,2)) &&...
+                        cleandata{i}(hour,3)==dmrsstarts(hotday,2) %month, day, and year all match
+                    dailyavg=sum(cleandata{i}(hour:hour+23,6));
+                    hourincr=24;match=1;
+                    if eventc>=1;prevdailyavg=dailyavg;end
+                    dailyavg=dailyavg/24;
+                    eventc=eventc+1;
+                    hoteventsstns{i,eventc}=dailyavg;
+                end
+            end
+        end
+        if match==0;hourincr=1;end
+        hour=hour+hourincr;
+    end
+end
     
 
 

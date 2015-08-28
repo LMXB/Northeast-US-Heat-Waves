@@ -6,11 +6,13 @@
 %region='us-ne';
 %vararginnew={'contour';1;'mystep';2;'plotCountries';1;'colormap';'jet'};
 
+%If caxismethod='regional', then mystep is overwritten to match this
+%regional formulation, even if explicitly specified in the function call
+
 function [fg, cb] = plotModelData(data, region, vararginnew)
 
 caxisRange = [];
-exist figc;
-if ans==1;figc=figc+1;else figc=1;end   
+exist figc;if ans==1;figc=figc+1;else figc=1;end   
 contour = false;
 cb = 0;
 fg = 0;
@@ -24,9 +26,6 @@ vectorData = {};
 plotCountries = false;
 
 fprintf('Region chosen is: %s\n',region);
-%disp(region);
-%disp(data);
-%disp(length(vararginnew));
 disp('Variable arguments chosen are listed below:');
 disp(vararginnew);
 if mod(length(vararginnew),2)~=0
@@ -44,6 +43,8 @@ else
                 caxis_min=val;
             case 'caxismax'
                 caxis_max=val;
+            case 'caxismethod'
+                caxis_method=val; %'regional' or 'global' (latter is default)
             case 'figc'
                 figc = val;
             case 'title'
@@ -68,48 +69,52 @@ fgHandles = findobj('Type','figure');
 if length(fgHandles) > 0
     figc = max(fgHandles)+1;
 end
-if ~noNewFig
-    fg = figure(figc);
+if noNewFig~=1
+    fg = figure(figc);clf;
     set(fg, 'Color', [1,1,1]);
     axis off;
-
-    title(fgTitle);
-    xlabel(fgXaxis);
-    ylabel(fgYaxis);
+    title(fgTitle);xlabel(fgXaxis);ylabel(fgYaxis);
+else
+    hold on;
 end
 
 if strcmp(region, 'world')
     worldmap world;
     data{1}(:, end+1) = data{1}(:, end) + (data{1}(:, end)-data{1}(:, end-1));
     data{2}(:, end+1) = data{2}(:, end) + (data{2}(:, end)-data{2}(:, end-1));
-    data{3}(:, end+1) = data{3}(:, end) + (data{3}(:, end)-data{3}(:, end-1));
-    
+    data{3}(:, end+1) = data{3}(:, end) + (data{3}(:, end)-data{3}(:, end-1)); 
     mlabel off; plabel off;
 elseif strcmp(region, 'north atlantic')
     worldmap([25 75], [-75 10]);
 elseif strcmp(region, 'usa')
-    axesm('mercator','MapLatLimit',[23 50],'MapLonLimit',[-128 -63]);
-    framem off; gridm off; mlabel off; plabel off;
+    southlat=23;northlat=50;westlon=-128;eastlon=-63;
 elseif strcmp(region, 'usa-exp')
-    axesm('mercator','MapLatLimit',[23 60],'MapLonLimit',[-135 -55]);
-    framem off; gridm off; mlabel off; plabel off;
+    southlat=23;northlat=60;westlon=-135;eastlon=-55;
 elseif strcmp(region, 'africa')
-    axesm('mercator','MapLatLimit',[-30 30],'MapLonLimit',[-20 60]);
-    framem off; gridm off; mlabel off; plabel off;
+    southlat=-30;northlat=30;westlon=-20;eastlon=60;
 elseif strcmp(region, 'west-africa')
-    axesm('mercator','MapLatLimit',[0 30],'MapLonLimit',[-20 40]);
-    framem off; gridm off; mlabel off; plabel off;
+    southlat=0;northlat=30;westlon=-20;eastlon=40;
 elseif strcmp(region, 'north-america')
-    axesm('mercator','MapLatLimit',[20 75],'MapLonLimit',[-160 -35]);
-    framem off; gridm off; mlabel off; plabel off;
+    southlat=20;northlat=75;westlon=-160;eastlon=-35;
 elseif strcmp(region, 'us-ne')
-    axesm('mercator','MapLatLimit',[35 50],'MapLonLimit',[-85 -60]);
-    framem off; gridm off; mlabel off; plabel off;
+    southlat=35;northlat=50;westlon=-85;eastlon=-60;
+elseif strcmp(region, 'na-east')
+    southlat=25;northlat=55;westlon=-100;eastlon=-50;
+elseif strcmp(region, 'nyc-area')
+    southlat=39;northlat=42;westlon=-76;eastlon=-72;
 else
     worldmap(region);
     data{1}(:, end+1) = data{1}(:, end) + (data{1}(:, end)-data{1}(:, end-1));
     data{2}(:, end+1) = data{2}(:, end) + (data{2}(:, end)-data{2}(:, end-1));
 end
+
+axesm('mercator','MapLatLimit',[southlat northlat],'MapLonLimit',[westlon eastlon]);
+framem off; gridm off; mlabel off; plabel off;
+%Assumes sw point is always over land... would need to be adjusted otherwise
+a=wnarrgridpts(southlat,westlon);
+southindex=a(1,1);westindex=a(1,2);
+b=wnarrgridpts(northlat,eastlon);
+northindex=b(1,1);eastindex=b(1,2);
 
 if length(colormapVal) > 0
     colormap(colormapVal);
@@ -121,13 +126,34 @@ exist mystep;
 if ans==0
     mystep = (max(max(data{3}))-min(min(data{3})))/10;
 end
+%Determine the color range, either by specification in the function call or
+%by default here
 exist caxis_min;
 if ans==0
-    caxis_min = round2(min(min(data{3})), mystep, 'floor');
+    exist caxis_method;
+    if ans==0 %default is to determine range globally
+        caxis_min=round2(min(min(data{3})), mystep, 'floor');
+    elseif strcmp(caxis_method,'regional')
+        caxis_min=round2(min(min(data{3}(southindex:northindex,westindex:eastindex))), mystep, 'floor');
+        mystep = (max(max(data{3}(southindex:northindex,westindex:eastindex)))-...
+            min(min(data{3}(southindex:northindex,westindex:eastindex))))/10;
+        disp('Note: Step size has been overwritten to match the regional nature of the color axis.');
+    else
+        caxis_min = round2(min(min(data{3})), mystep, 'floor');
+    end
 end
 exist caxis_max;
 if ans==0
-    caxis_max = round2(max(max(data{3})), mystep, 'ceil');
+    exist caxis_method;
+    if ans==0 %default is to determine range globally
+        caxis_max=round2(max(max(data{3})), mystep, 'ceil');
+    elseif strcmp(caxis_method,'regional')
+        caxis_max=round2(max(max(data{3}(southindex:northindex,westindex:eastindex))), mystep, 'ceil');
+        mystep = (max(max(data{3}(southindex:northindex,westindex:eastindex)))-...
+            min(min(data{3}(southindex:northindex,westindex:eastindex))))/10;
+    else
+        caxis_max = round2(max(max(data{3})), mystep, 'ceil');
+    end
 end
 caxisRange=[caxis_min,caxis_max];
 
@@ -139,6 +165,9 @@ if contour
         contourfm(data{1}, data{2}, data{3});
     end
     caxis(caxisRange);
+    phr=sprintf('Contour interval: %0.3f',mystep);
+    uicontrol('Style','text','String',phr,'Units','normalized',...
+        'Position',[0.4 0.05 0.2 0.05],'BackgroundColor','w');
 else
     pcolorm(data{1}, data{2}, data{3});
     caxis(caxisRange);
