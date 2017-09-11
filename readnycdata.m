@@ -5,18 +5,17 @@
 %                 for reading in hourly NRCC data (1941-2014), about 3 min total
 
 %Instead of running, consider...
-%load('/Users/colin/Documents/General_Academics/Research/Exploratory_Plots/Saved_Variables_etc/workspace_readnycdata');
+%load('/Users/colin/Documents/General_Academics/Research/Exploratory_Plots/Saved_Variables_etc/readnycdata');
 
 
 
 %^--(|\@#?%^--(|\@#?%^--(|\@#?%^--(|\@#?%^--(|\@#?%^--(|\@#?%^--(|\@#?%^--(|\@#?%^--(|\@#?%^--(|\@#?%^--(|\@#?%^--(|\@#?
 %Runtime options
 createnewvectors=1;         %whether to redefine the main vectors; these are the ones saved in output_readnycdata.mat
-readncdcdata=0;             %whether to read NCDC-derived netCDF files which span 1/1/73-12/31/13 at hourly res (SLOW)
-readdailyclimoddata=0;      %whether to read CLIMOD-derived CSV files which include temps & precip at daily res
-readhourlynrccdata=1;       %whether to read NRCC-derived CSV files which include everything at hourly res
-computedailyfromhourly=1;   %whether to compute daily max/min from hourly data (that may already have been read in)
-computedailyfromhourlyreg=1;%whether to compute regional-avg daily max/min from hourly data
+readhourlynrccdata=0;       %whether to read NRCC-derived CSV files which include everything at hourly res
+interpolatehourlynrccdata=1;%whether to interpolate to fill gaps and from 3-hourly to 1-hourly (25 min)
+computedailyfromhourly=0;   %whether to compute daily max/min from hourly data (that may already have been read in)
+computedailyfromhourlyreg=0;%whether to compute regional-avg daily max/min from hourly data
 usingncdcdata=0;            %these three options specify which of the datasets are being used
 usingdailyclimoddata=0;     %(in other words, which was read in last)
 usinghourlynrccdata=1;
@@ -24,6 +23,7 @@ usinghourlynrccdata=1;
 
 
 %Other variables to set
+curDir='/Users/craymon3/General_Academics/Research/Exploratory_Plots/';
 narrnumyears=36; %for NARR records (1979-2014)
 obsnumyears=41;startyear=1973; %for NCDC station obs
 numyearsd=151; %max possible for daily CLIMOD station obs
@@ -49,6 +49,7 @@ allcities=['    Atl City A';'    Bridgeport';'         JFK A';'   LaGuardia A';'
     '    Toms River';'Philadelphia A';'   Teterboro A';'  Little Falls';'      Paterson';'   Jersey City';...
     '       Islip A';'     Scarsdale';'   Dobbs Ferry';'   Port Jervis';'       Mineola'];
 %The following 11 stations are the subset of those above for which hourly obs are available
+%in other words, these are the first 7 of pr1, the first and last of pr2, and the first of pr3 & pr4
 prh={'AtlCityA';'BridgeportA';'JFK';'LaGuardia';'NewarkA';'WhitePlA';'CentralPark';...
     'TrentonA';'PhiladelphiaA';'TeterboroA';'IslipA'};
 ah=size(prh);numstnsh=ah(1);
@@ -83,9 +84,11 @@ stnlocs4(:,1)=[40.794;40.983;41.007;41.38;40.733];
 stnlocs4(:,2)=[-73.102;-73.8;-73.834;-74.685;-73.618];
 stnlocs4(:,3)=[84;199;200;470;96];stnlocs4(:,3)=stnlocs4(:,3)/mf;
 stnlocs=[stnlocs1;stnlocs2;stnlocs3;stnlocs4];
+%same as above but for 11 hourly stations only
 stnlocsh(:,1)=[39.449;41.158;40.639;40.779;40.683;41.067;40.779;40.277;39.868;40.85;40.794];
 stnlocsh(:,2)=[-74.567;-73.129;-73.762;-73.880;-74.169;-73.708;-73.969;-74.816;-75.231;-74.061;-73.102];
 stnlocsh(:,3)=[60;5;11;11;7;379;130;184;10;9;84];stnlocsh(:,3)=stnlocsh(:,3)/mf;
+save(strcat(curDir,'basicstuff'),'stnlocsh','-append');
 
 colorlist={colors('red');colors('light red');colors('light orange');...
     colors('light green');colors('green');colors('blue');colors('light purple');colors('pink')};
@@ -142,255 +145,7 @@ if createnewvectors==1
     dailysumseachday=cell(numstns,1);
 end
 
-%Data source option 1: NCDC daily data, 1973-2014
-if readncdcdata==1
-cd /Users/colin/Documents/General_Academics/Research/Exploratory_Plots/Station_Data/NCDC_Hourly_Obs;
-    for stnc=4:4
-        prefix=pr(stnc);
-        disp(prefix);  
-        curfile=sprintf('%s.nc',char(prefix));
-        if stnc==sa
-            saincluded=1;
-        end
-        if stnc==1
-            first=1;
-        elseif first==1
-            if stnc==numstns
-                firstandlast=1;
-            end
-        end
-
-        temp=ncread(curfile,'time');
-        eval(['time' char(prefix) '=temp;']);
-
-        temp=ncread(curfile,'temperatures');
-        temp(temp<=-2*10^30)=-100; %still distinct but without the ridiculous values
-        temp(temp<=-1*10^30)=-50;
-        eval(['temps2m' char(prefix) '=temp;']);
-
-        temp=ncread(curfile,'dewpoints');
-        temp(temp<=-2*10^30)=-100;temp(temp<=-1*10^30)=-50;
-        eval(['dewpt2m' char(prefix) '=temp;']);
-
-        temp=ncread(curfile,'winddirs');
-        temp(temp<=-888)=-10;
-        eval(['winddir' char(prefix) '=temp;']);
-
-        temp=ncread(curfile,'windspeeds');
-        temp(temp<=-2*10^30)=-100;temp(temp<=-1*10^30)=-50;
-        eval(['windspeed' char(prefix) '=temp;']);
-
-        temp=ncread(curfile,'total_cloud_cover');
-        temp(temp<=-888)=-10;
-        eval(['tcc' char(prefix) '=temp;']);
-
-        temp=ncread(curfile,'slp');
-        temp(temp<=-2*10^30)=850;temp(temp<=-1*10^30)=900;
-        eval(['slp' char(prefix) '=temp;']);
-
-        eval(['dailymaxvec' char(prefix) '=zeros(366,obsnumyears);']);
-        eval(['dailyminvec' char(prefix) '=zeros(366,obsnumyears);']);
-        eval(['dailymaxvec1D' char(prefix) '=zeros(366*obsnumyears,3);']);
-        eval(['dailyminvec1D' char(prefix) '=zeros(366*obsnumyears,3);']);
-        hourofday=0;dateinyear=1;obsryear=1;totalnumdays=1;
-        totalnumdaysasofnextdec31=365;totalnumdaysasoflastdec31=0;
-        eval(['dailymax' char(prefix) '=-99;']);
-        eval(['dailymin' char(prefix) '=99;']);
-
-        maxhourlyjump=1;curdailysum=0;daysskipped=0;
-        discontcount=0;totalnumhours=0;totalhoursincurday=1;
-
-        for i=2:size(eval(['temps2m' char(prefix)]),1) %2 AM on 1/1/73
-        %for i=1:1200
-            curtime=subindex(eval(['time' char(prefix)]),i,1);
-            prevtime=subindex(eval(['time' char(prefix)]),i-1,1);
-            hourlyjump=curtime-prevtime;
-
-            oldhourofday=hourofday;
-            hourofday=hourofday+hourlyjump;
-            totalnumhours=totalnumhours+hourlyjump;
-            if hourlyjump~=1
-                %disp('Found a discontinuity');
-                %disp(i);disp(hourlyjump);
-                discontcount=discontcount+hourlyjump-1;
-                totalhoursincurday=totalhoursincurday+hourlyjump;
-                %disp(hourofday);disp(oldhourofday);
-                if hourlyjump>maxhourlyjump
-                    maxhourlyjump=hourlyjump;
-                end
-                if hourlyjump>=24
-                    reductioncount=1;
-                    hourofdayreduced=hourofday;
-                    while hourofdayreduced>=25
-                        hourofdayreduced=hourofdayreduced-reductioncount*24;
-                        reductioncount=reductioncount+1;
-                    end
-                    daysskipped=daysskipped+reductioncount-1;
-                end
-
-            end
-
-            hourlytemp=subindex(eval(['temps2m' char(prefix)]),i,1)+Kc;
-            if hourlytemp>eval(['dailymax' char(prefix)])
-                eval(['dailymax' char(prefix) '=hourlytemp;']);
-            end
-            if hourlytemp<eval(['dailymin' char(prefix)])
-                eval(['dailymin' char(prefix) '=hourlytemp;']);
-            end
-
-            curdailysum=curdailysum+hourlytemp;
-
-            if hourofday>=25;hourofday=hourofday-24;end
-            %disp(hourofday);
-            %if rem(hourofday,24)==daystarthour-1 %another day is over
-            if hourlyjump<=24
-                if rem(curtime,24)==0
-                    %disp(hourofday);disp(dateinyear);
-                    dailymaxvecs{stnc}(dateinyear,obsryear)=...
-                        eval(['dailymax' char(prefix)]);
-                    dailyminvecs{stnc}(dateinyear,obsryear)=...
-                        eval(['dailymin' char(prefix)]);
-                    dailymaxvecs1D{stnc}(totalnumdays,1)=eval(['dailymax' char(prefix)]);
-                    dailyminvecs1D{stnc}(totalnumdays,1)=eval(['dailymin' char(prefix)]);
-                    dailymaxvecs1D{stnc}(totalnumdays,2)=dateinyear;
-                    dailyminvecs1D{stnc}(totalnumdays,2)=dateinyear;
-                    dailymaxvecs1D{stnc}(totalnumdays,3)=obsryear+startyear-1;
-                    dailyminvecs1D{stnc}(totalnumdays,3)=obsryear+startyear-1;
-                    curdailysum=double(curdailysum);totalhoursincurday=double(totalhoursincurday);
-                    dhavgvecs{stnc}(dateinyear,obsryear)=curdailysum/totalhoursincurday;
-                    dhavgvecs1D{stnc}(totalnumdays,1)=curdailysum/totalhoursincurday;
-                    dhavgvecs1D{stnc}(totalnumdays,2)=dateinyear;
-                    dhavgvecs1D{stnc}(totalnumdays,3)=obsryear+startyear-1;
-                    %disp(273.15+curdailysum/totalhoursincurday);
-                    %disp('above is hourly avg; below are daily max & min');
-                    %disp(eval(['dailymax' char(prefix)])+273.15);
-                    %disp(eval(['dailymin' char(prefix)])+273.15);
-
-                    dateinyear=dateinyear+1;hourofday=daystarthour-1;
-                    %disp(dateinyear);
-                    eval(['dailymax' char(prefix) '=-99;']);
-                    eval(['dailymin' char(prefix) '=99;']);
-                    totalnumdays=totalnumdays+1;
-                    totalhoursineachday{stnc}(obsryear,dateinyear)=totalhoursincurday;
-                    dailysumseachday{stnc}(obsryear,dateinyear)=curdailysum;
-                    %disp(totalhoursincurday);
-                    totalhoursincurday=0;curdailysum=0;
-                    %disp(totalnumdays);    
-                end
-                %disp(totalhoursincurday);
-                totalhoursincurday=totalhoursincurday+1;
-            else
-                for j=1:daysskipped
-                    dailymaxvecs{stnc}(dateinyear,obsryear)=-50;
-                    dailyminvecs{stnc}(dateinyear,obsryear)=-50;
-                    dailymaxvecs1D{stnc}(totalnumdays,1)=-50;
-                    dailyminvecs1D{stnc}(totalnumdays,1)=-50;
-                    dailymaxvecs1D{stnc}(totalnumdays,2)=dateinyear;
-                    dailyminvecs1D{stnc}(totalnumdays,2)=dateinyear;
-                    dailymaxvecs1D{stnc}(totalnumdays,3)=obsryear+startyear-1;
-                    dailyminvecs1D{stnc}(totalnumdays,3)=obsryear+startyear-1;
-                    dateinyear=dateinyear+1;totalnumdays=totalnumdays+1;
-                    curdailysum=0;
-                    %disp('A day was skipped');
-                end
-            end
-            %elseif rem(hourofday,24)==0
-                %totalnumdays=totalnumdays+1;
-                %disp(totalnumdays);
-                %hourofday=0;
-            %end
-            if rem(obsryear,4)==0 && obsryear~=28 %i.e. a leap year
-                lengthofyear=366;lengthofnextyear=365;
-            elseif rem(obsryear+1,4)==0 && obsryear+1~=28 %year before a leap year
-                lengthofyear=365;lengthofnextyear=366;
-            else
-                lengthofyear=365;lengthofnextyear=365;
-            end
-            if curtime>=24*(totalnumdaysasofnextdec31)
-                %lengthofyearvec(relativeyear)=lengthofyear;
-                iisinjan=1;obsryear=obsryear+1;
-                totalnumdaysasoflastdec31=totalnumdaysasofnextdec31;
-                totalnumdaysasofnextdec31=totalnumdaysasofnextdec31+lengthofnextyear;
-                %disp('Year over');disp(curtime);
-                %disp(i);disp(dateinyear);
-                dateinyear=1;
-                %disp(lengthofyear);
-            end
-
-        end
-        disp(sprintf('Total hours of discontinuities: %n',discontcount));
-        disp(discontcount);
-        maxhourlyjumpvec(stnc)=maxhourlyjump;
-        numdaysskippedvec(stnc)=daysskipped;
-        numhoursskippedvec(stnc)=discontcount;
-    end
-end
-
-%Data source option 2: CLIMOD daily data, 1874-2014
-totalstnc=0;
-if readdailyclimoddata==1
-    cd /Users/colin/Documents/General_Academics/Research/Exploratory_Plots/Station_Data/Climod_Daily_Obs;
-    for spreadsheet=1:4
-        if spreadsheet==1
-            sprdata=csvread('StnDataMarquee.csv','r');numstnshere=8;
-        elseif spreadsheet==2
-            sprdata=csvread('StnDataSouth&CentralNJ.csv','r');numstnshere=5;
-        elseif spreadsheet==3
-            sprdata=csvread('StnDataNorthNJ.csv','r');numstnshere=4;
-        elseif spreadsheet==4
-            sprdata=csvread('StnDataSuburbanNY&CT.csv','r');numstnshere=5;
-        end
-        for stnc=1:numstnshere    
-            dateinyear=1;obsryear=1;totalnumdays=1;totalstnc=totalstnc+1;
-            for i=1:size(sprdata,1)
-                actualyear=sprdata(i,1);obsryear=actualyear-1864;
-                %disp(dateinyear);disp(actualyear);
-                dailymaxvecs{totalstnc}(dateinyear,obsryear)=(5/9)*(sprdata(i,6*stnc-2)-32);
-                dailyminvecs{totalstnc}(dateinyear,obsryear)=(5/9)*(sprdata(i,6*stnc-1)-32);
-                if dailymaxvecs{totalstnc}(dateinyear,obsryear)>-50 &&...
-                        dailyminvecs{totalstnc}(dateinyear,obsryear)>-50
-                    dailyavgvecs{totalstnc}(dateinyear,obsryear)=...
-                    (dailymaxvecs{totalstnc}(dateinyear,obsryear)+dailyminvecs{totalstnc}(dateinyear,obsryear))/2;
-                else
-                    dailyavgvecs{totalstnc}(dateinyear,obsryear)=-99;
-                end
-                dailymaxvecs1D{totalstnc}(totalnumdays,1)=(5/9)*(sprdata(i,6*stnc-2)-32);
-                dailymaxvecs1D{totalstnc}(totalnumdays,2)=dateinyear;
-                dailymaxvecs1D{totalstnc}(totalnumdays,3)=actualyear;
-                dailyminvecs1D{totalstnc}(totalnumdays,1)=(5/9)*(sprdata(i,6*stnc-1)-32);
-                dailyminvecs1D{totalstnc}(totalnumdays,2)=dateinyear;
-                dailyminvecs1D{totalstnc}(totalnumdays,3)=actualyear;
-                dailyavgvecs1D{totalstnc}(totalnumdays,1)=...
-                    (dailymaxvecs{totalstnc}(dateinyear,obsryear)+dailyminvecs{totalstnc}(dateinyear,obsryear))/2;
-                dailyavgvecs1D{totalstnc}(totalnumdays,2)=dateinyear;
-                dailyavgvecs1D{totalstnc}(totalnumdays,3)=actualyear;
-
-                %Make sure -99 values stay that way
-                if dailymaxvecs{totalstnc}(dateinyear,obsryear)<-72
-                    dailymaxvecs{totalstnc}(dateinyear,obsryear)=-99;
-                    dailymaxvecs1D{totalstnc}(totalnumdays,1)=-99;
-                end
-                if dailyminvecs{totalstnc}(dateinyear,obsryear)<-72
-                    dailyminvecs{totalstnc}(dateinyear,obsryear)=-99;
-                    dailyminvecs1D{totalstnc}(totalnumdays,1)=-99;
-                end
-                if dailyavgvecs{totalstnc}(dateinyear,obsryear)<-72
-                    dailyavgvecs{totalstnc}(dateinyear,obsryear)=-99;
-                    dailyavgvecs1D{totalstnc}(totalnumdays,1)=-99;
-                end
-
-                dateinyear=dateinyear+1;totalnumdays=totalnumdays+1;
-                if i~=size(sprdata,1);yearasoftomorrow=sprdata(i+1,1);end              
-                if actualyear~=yearasoftomorrow %i.e. today is Dec 31
-                    obsryear=obsryear+1;
-                    dateinyear=1;
-                end
-            end
-        end
-    end
-end
-
-%Data source option 3: NRCC hourly data, 1941-2014
+%NRCC hourly data, 1941-2014
 %Order of stations is given by prhcodes
 if readhourlynrccdata==1
     disp(clock);
@@ -413,7 +168,6 @@ if readhourlynrccdata==1
     %Heat-index formula is from http://www.wpc.ncep.noaa.gov/html/heatindex_equation.shtml
     %WBT formula is from Stull 2011, DOI: 10.1175/JAMC-D-11-0143.1
     for stnc=1:size(prhcodes,1)
-    %for stnc=7:7
         cursprdata=eval(['sprdata' num2str(stnc)]);currow=1;donenow=0;
         shortersmon=cursprdata(1,1);shortersday=cursprdata(1,2);shortersyear=cursprdata(1,3);
         phlsmon=sprdata9(1,1);phlsday=sprdata9(1,2);phlsyear=sprdata9(1,3);
@@ -444,14 +198,15 @@ if readhourlynrccdata==1
         hourlytvecs{stnc}(currow:size(sprdata9,1),11)=cursprdata(1:size(cursprdata,1),11)*8; %sky coverage
         airtemp=(cursprdata(1:size(cursprdata,1),5)-32)*5/9;airtempF=cursprdata(1:size(cursprdata,1),5);
         eta=1-((airtemp+273.15)./647.1); %dimensionless ratio
-        satvpairtemp=220640*exp((647.1./(airtemp+273.15)).*(-7.86*eta+1.844*eta.^1.5-11.787*eta.^3+...
+        satvpofairtemp=220640*exp((647.1./(airtemp+273.15)).*(-7.86*eta+1.844*eta.^1.5-11.787*eta.^3+...
             22.681*eta.^3.5-15.962*eta.^4+1.801*eta.^7.5)); %in hPa
         dewpttemp=(cursprdata(1:size(cursprdata,1),6)-32)*5/9;
         eta=1-((dewpttemp+273.15)./647.1);
-        satvpdewpttemp=220640*exp((647.1./(dewpttemp+273.15)).*(-7.86*eta+1.844*eta.^1.5-11.787*eta.^3+...
+        satvpofdewpttemp=220640*exp((647.1./(dewpttemp+273.15)).*(-7.86*eta+1.844*eta.^1.5-11.787*eta.^3+...
             22.681*eta.^3.5-15.962*eta.^4+1.801*eta.^7.5));
-        hourlytvecs{stnc}(currow:size(sprdata9,1),12)=100*satvpdewpttemp./satvpairtemp; %finally, the RH
-        rh=100*satvpdewpttemp./satvpairtemp;
+        rh=100*satvpofdewpttemp./satvpofairtemp; %finally, the RH
+        hourlytvecs{stnc}(currow:size(sprdata9,1),12)=rh; %relative humidity
+        
         airtempF(airtempF<80)=-99; %heat index is only valid for T>=80 F, so anything below is masked to -99
         hourlytvecs{stnc}(currow:size(sprdata9,1),13)=-42.379+2.049*airtempF+...
             10.1433*rh-0.22476*airtempF.*rh-0.00684*airtempF.*airtempF-0.0548*rh.*rh+...
@@ -465,6 +220,106 @@ if readhourlynrccdata==1
         wbt(wbt>50)=-99; %unphysical values that come from missing data, etc.
         hourlytvecs{stnc}(currow:size(sprdata9,1),14)=wbt; %WBT
     end
+    save('/Users/colin/Documents/General_Academics/Research/Exploratory_Plots/Saved_Variables_etc/readnycdata','hourlytvecs');
+    disp(clock);
+end
+        
+        
+%Interpolate from 3-hourly to 1-hourly for time periods where this is an issue
+%For wind direction, assume wind azimuth moved around the compass rose the shorter way, 
+%i.e. always through <=180 deg in a 3-hour period
+if interpolatehourlynrccdata==1
+    disp(clock);
+    for stnc=1:size(prhcodes,1)
+        for i=3:size(hourlytvecs{stnc},1)-3
+        %for i=229950:230050
+            for col=5:14
+                vecofnumstoroundto=[0;0;0;0;0.1;0.1;0.5;0.1;0.1;0.1;0.5;1;0.01;0.01];
+                if hourlytvecs{stnc}(i,col)<=-50 && hourlytvecs{stnc}(i+3,col)<=-50 &&... 
+                    hourlytvecs{stnc}(i-1,col)>-50 && hourlytvecs{stnc}(i+2,col)>-50  
+                    %i.e. data for this hour & 3 hours later are missing (a highly suspicious pattern), 
+                    %but data for other hours exist such that this hour can be interpolated from them
+                    %plain english: this hour is the first of two consecutive missing
+                    if col~=7 %everything is simple except wind direction
+                        newres=0.667*hourlytvecs{stnc}(i-1,col)+0.333*hourlytvecs{stnc}(i+2,col);
+                        hourlytvecs{stnc}(i,col)=round2(newres,vecofnumstoroundto(col));
+                    else
+                        azchange=abs(hourlytvecs{stnc}(i+2,col)-hourlytvecs{stnc}(i-1,col));
+                        if azchange>180 %complicated stuff, having to go the other way around the compass rose
+                            smalleraz=min(hourlytvecs{stnc}(i+2,col),hourlytvecs{stnc}(i-1,col));
+                            biggeraz=max(hourlytvecs{stnc}(i+2,col),hourlytvecs{stnc}(i-1,col));
+                            smallerazenlarged=smalleraz+360;
+                            if smalleraz==hourlytvecs{stnc}(i-1,col);earlierhourismin=1;else earlierhourismin=0;end
+                            if earlierhourismin==1
+                                newaz=0.667*smallerazenlarged+0.333*biggeraz;
+                            else
+                                newaz=0.333*smallerazenlarged+0.667*biggeraz;
+                            end
+                            if newaz>360;newaz=newaz-360;end
+                        else %can just do a straight weighting as with the other variables
+                            newaz=0.667*hourlytvecs{stnc}(i-1,col)+0.333*hourlytvecs{stnc}(i+2,col);
+                        end
+                        hourlytvecs{stnc}(i,col)=round2(newaz,vecofnumstoroundto(col));
+                    end
+                elseif hourlytvecs{stnc}(i,col)<=-50 && hourlytvecs{stnc}(i+3,col)<=-50 &&...
+                    hourlytvecs{stnc}(i-2,col)>-50 && hourlytvecs{stnc}(i+1,col)>-50
+                    %this hour is the second of two consecutive missing
+                    if col~=7
+                        newres=0.333*hourlytvecs{stnc}(i-2,col)+0.667*hourlytvecs{stnc}(i+1,col);
+                        hourlytvecs{stnc}(i,col)=round2(newres,vecofnumstoroundto(col));
+                    else
+                        azchange=abs(hourlytvecs{stnc}(i+1,col)-hourlytvecs{stnc}(i-2,col));
+                        if azchange>180
+                            smalleraz=min(hourlytvecs{stnc}(i+1,col),hourlytvecs{stnc}(i-2,col));
+                            biggeraz=max(hourlytvecs{stnc}(i+1,col),hourlytvecs{stnc}(i-2,col));
+                            smallerazenlarged=smalleraz+360;
+                            if smalleraz==hourlytvecs{stnc}(i-2,col);earlierhourismin=1;else earlierhourismin=0;end
+                            if earlierhourismin==0
+                                newaz=0.667*smallerazenlarged+0.333*biggeraz;
+                            else
+                                newaz=0.333*smallerazenlarged+0.667*biggeraz;
+                            end
+                            if newaz>360;newaz=newaz-360;end
+                        else
+                            newaz=0.333*hourlytvecs{stnc}(i-2,col)+0.667*hourlytvecs{stnc}(i+1,col);
+                        end
+                        hourlytvecs{stnc}(i,col)=round2(newaz,vecofnumstoroundto(col));
+                    end
+                else
+                    %Just round the values that are already there
+                    hourlytvecs{stnc}(i,col)=round2(hourlytvecs{stnc}(i,col),vecofnumstoroundto(col));
+                end
+            end
+        end
+        for i=2:size(hourlytvecs{stnc},1)-1 %interpolate where only one hour is missing
+            for col=5:14
+                if hourlytvecs{stnc}(i,col)<=-50 && hourlytvecs{stnc}(i-1,col)>-50 && hourlytvecs{stnc}(i+1,col)>-50
+                    if col~=7
+                        newres=(hourlytvecs{stnc}(i-1,col)+hourlytvecs{stnc}(i+1,col))/2;
+                        hourlytvecs{stnc}(i,col)=round2(newres,vecofnumstoroundto(col));
+                    else
+                        azchange=abs(hourlytvecs{stnc}(i+1,col)-hourlytvecs{stnc}(i-1,col));
+                        if azchange>180
+                            smalleraz=min(hourlytvecs{stnc}(i+1,col),hourlytvecs{stnc}(i-1,col));
+                            biggeraz=max(hourlytvecs{stnc}(i+1,col),hourlytvecs{stnc}(i-1,col));
+                            smallerazenlarged=smalleraz+360;
+                            if smalleraz==hourlytvecs{stnc}(i-1,col);earlierhourismin=1;else earlierhourismin=0;end
+                            if earlierhourismin==0
+                                newaz=0.5*smallerazenlarged+0.5*biggeraz;
+                            else
+                                newaz=0.5*smallerazenlarged+0.5*biggeraz;
+                            end
+                            if newaz>360;newaz=newaz-360;end
+                        else
+                            newaz=0.5*hourlytvecs{stnc}(i-1,col)+0.5*hourlytvecs{stnc}(i+1,col);
+                        end
+                        hourlytvecs{stnc}(i,col)=round2(newaz,vecofnumstoroundto(col));
+                    end
+                end
+            end
+        end
+    end
+    save('/Users/colin/Documents/General_Academics/Research/Exploratory_Plots/Saved_Variables_etc/readnycdata','hourlytvecs');
     disp(clock);           
 end
 
@@ -553,7 +408,7 @@ if computedailyfromhourly==1
 end
 
 %Computes regional daily maxes from hourly data, so that the daily
-%regional max is the **hour** at which the desired index is maximal across the entire region
+%regional max is occurs at a particular hour when the desired (regional) index is maximized
 if computedailyfromhourlyreg==1
     dailymaxhrreg=cell(3,1);
     for categ=1:3 %max T, WBT, and heat index in that order

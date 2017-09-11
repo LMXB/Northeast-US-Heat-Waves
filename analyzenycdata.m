@@ -1,50 +1,83 @@
 %Analyze station data for the NYC region
 
-%Instead of running this, consider...
-%load('/Users/colin/Documents/General_Academics/Research/Exploratory_Plots/Saved_Variables_etc/workspace_analyzenycdata');
+%loadsavedarrays;
+
+%If rerunning, necessary loops are:
+%createnewvectors, computebasicstats, calculatehourlyprctiles, makeheatwaverankingnew, 
+%calchwseverityscores OR calchwavgtwbt (the latter being the more-modern version), makehwseverityscatterplot, clusterheatwaves
+%Key variables to save in workspace_analyzenycdatahighpctxxxx are (*mandatory*):
+%*integTprctiles*, regTvecsavedforlater, regTprctiles, reghwdaysbyT,
+%*maxhwlength*,
+%*reghwbyTstarts*, *reghwbyTstartsshortonly*, *numreghwsbyT*, *hwbyTstarthours*, *hwbyTstarthoursshortonly*,
+%*scorescomptotalhw*, *scorescompbperhwavg*, 
+%*scorescompxperhwavg*, *scorescompnperhwavg*, *Xmatrix*, *idx*,
+%*veryvslessmoisthws*, *listofhws*, *hwmoistdistn*
+%(Operational) code for saving is at very end of script
 
 %readnycdata must have already been run or loaded
-%     This script analyzes whichever data source was supplied there via the readxxxdata runtime option
-%     Readnycdata determines how many stations are available, periods of record, &c
-%     because the options there produce two mutually distinct versions of dailymaxvecs & its associates
+%This script analyzes whichever data source was supplied there via the readxxxdata runtime option
 
-%Current total runtime: about 8 min
+runremotely=0;
+if runremotely==1
+    addpath('/cr/cr2630/Scripts/GeneralPurposeScripts');
+    load('/cr/cr2630/Saved_Variables_etc/readnycdata.mat');
+    savedvardir='/cr/cr2630/Saved_Variables_etc/';
+else
+    savedvardir='/Users/craymon3/General_Academics/Research/Exploratory_Plots/Saved_Variables_etc/';
+    load(strcat(savedvardir,'readnycdata.mat'));
+end
+
+fullrun=0; %i.e. running all the major loops or not (need to know for saving purposes)
+
+
+%Current total runtime: about 8 min on local machine, 2 min on remote machine
 
 
 
 %*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~
 %Runtime options
+stnf=3;stnl=7; %station range to compute things for
+monthiwf=6;monthiwl=8; %month range to compute things for
+
 createnewvectors=0;         %whether to redefine some of the key vectors created in this script
 displaystnsperyear=0;       %whether to display the chart of the # of available stations over time
-computebasicstats=0;        %whether to organize data and compute main stats (6 min)
+computebasicstats=0;        %whether to organize data and compute main stats, using highpct as defined just below (3 min)
+    computedailystuff=0;        %whether to compute old loops with daily summaries, etc
 showdefnplot=0;             %whether to show plot illustrating main heat-wave definition
 calculatehourlyprctiles=0;  %whether to calculate the 90th percentile of each hour of the day by month & station (1 min)
-makeheatwaverankingold=0;   %whether to compute the heat-wave ranking using the old definition
-    %*To define*: >=3 consecutive days where daily Tmax OR Tmin exceeds that station's monthly 90th percentile
-    %*To rank*: the heatwave-integrated daily max and min over the 90th-pct threshold
-makeheatwaverankingnew=1;   %whether to compute the heat-wave ranking using the new def'n of integrated hourly T/WBT (30 sec)
+makeheatwaverankingnew=0;   %whether to compute the heat-wave ranking using the new def'n of integrated hourly T/WBT (30 sec)
     %If changing anything, check the manual-removal subsection to be sure the right dates (if any) are being removed
-    monthiwf=6;monthiwl=8;
-    stnf=3;stnl=7; %station range to compute things for
+    %Default 'high percentile' (see below explanation) is 97.5 and 'low
+    %percentile' is 81, but these numbers can be relaxed or made stricter
+    %right here (e.g. to increase sample size for NCEP wavenumber analysis)
+    %Using new values here requires manually changing the code to eliminate
+    %regional heat waves with fewer than 3 consecutive days
+    highpct=0.975;if highpct==0.975;lowpct=0.81;elseif highpct==0.925;lowpct=0.43;end
+    cutoff=1;cutofflength=5; %whether to use a cutoff length, and what that cutoff length should be (in days)
     %*To define*: >=3 consecutive days where integrated hourly T/WBT >=97.5th
     %percentile for that station & month, continuing day by day (as long as
-    %every day's value is >=81st percentile), until the integrated value falls below the 97.5th-pct threshold
+    %every day's value is >=81st percentile), until the integrated value
+    %falls below the 97.5th-pct threshold, based on Meehl & Tebaldi 2004
     %*To rank*: no ranking, just place in chronological order
     %*To homogenize*: a regional heat-wave day is one on which all of EWR, JFK, and LGA are experiencing a heat wave 
     %(as CP's record begins in 1995)
 calchwseverityscores=0;     %whether to calculate hw-severity scores, with options for T vs WBT, night vs day, etc (10 sec)
     relativescores=0;       %whether to compute scores with absolute thresholds (default) or relative to each stn's climate
     absthreshdayt=32.2;absthreshnightt=22.2;absthreshwbt=23.8; %thresholds for absolute scores, in deg C
+compileallhwdata=0;         %whether to compile all hourly data for all 11 stations and all short heat waves into one big array
+calchwavgtwbt=0;            %(mutually exclusive) whether to calculate 'scores' using the simplified metric of just hw-avg T and hw-avg WBT (5 sec)
+    numstnsthisloop=3;          %number of stations to use in this loop -- typically 3 (Big Three) or numstns (i.e. all available)
 makehwseverityscatterplot=0;%whether to make scatterplot of above scores (20 sec)
     score1=1;score2=2;      %compare T and WBT (a relic option); see readmesowestobs for old version
     perday=1;               %whether to show scores calculated per day, or summed over the whole hw regardless of length
     groupbyregion=0;        %whether to split into coastal and inland groups (vs each station individually)
-    consolidatestns=0;      %whether to plot the average position of each stn (vs one pt per heatwave)
+    consolidatestns=1;      %whether to plot the average position of each stn (vs one pt per heatwave)
     colorsbyhwsymbolsbygroup=0;%whether to plot a different color for each hw & symbol for each group (vs all circles)
     colorsbyhwsymbolsbystn=0;  %same as above but for all stations
     colorsbyhw=1;           %whether to plot colors differentiating heat waves (no station identification)
+    symbolsbyhw=0;          %whether to plot a different-shaped symbol for each hw
     daytimeonly=0;          %whether to plot scores derived only from max/daytime values (vs all hours)
-    nighttimeonly=1;        %same as above, but for min/nighttime values
+    nighttimeonly=0;        %same as above, but for min/nighttime values
 findhottestdayseachstn=0;   %whether to compute and display hottest stn days (5 sec)
                                 %(i.e. those where >=1 stn has a top-10 max temp)
 clusterhotdays=0;           %whether to do k-means and hierarchical clustering of the aforementioned hot days
@@ -54,7 +87,10 @@ makedaterankchart=0;        %whether to compute & display chart comparing rankin
     linessevscore=0;            %line graphs of severity scores for each hw, showing regional average in bold and individual plots
     linesprctile=1;             %line graphs of percentiles, otherwise same
 clusterheatwaves=0;         %whether to k-means cluster T-defined regional heat waves using their hourly traces of T and WBT (10 sec)
-    kmin=7;kmax=7;          %minimum and maximum k to search over, to find the best
+    jfklgaewr=1;                %whether to conduct clustering based on values at these 3 stations only
+    largerregion=0;             %whether to conduct clustering based on a broader sample of 7 stations (see loop for details on which)
+    if jfklgaewr==1;kmin=7;kmax=7;else kmin=6;kmax=6;end %minimum and maximum k to search over, with defaults as shown (5-9 is supported)
+    kiw=6;                      %the value of k for which things work best
 narrdataforclusters=0;      %whether to display NARR composites for each of those clusters (12 min total)
     desvar=[3;4;5];             %NARR variable(s) to show in those composites -- 1 for T, 2 for WBT, 3 for hgt, 4 & 5 for wind
     preslevel=3;                %for hgt, pressure level to show -- 1-1000, 2-850, 3-500, 4-300, 5-200
@@ -64,9 +100,13 @@ displayclimohists=0;        %whether to display basic histograms of station clim
     histfixed=0;                %whether to display hists sorted by month; when problems are fixed, change to 1
 displaystnboxplots=0;       %whether to display comparative boxplots of JJA temp across stations
 displaystnpctiles=0;        %whether to display 5th, 50th, and 95th percentiles of daily max temp for each stn & month
+plotheatwavesperdecade=0;   %whether to display line graph of # of heat waves per decade, 1950-2014
+    hphere=0.925;               %whether to use less-strict (0.925) or more-strict (0.975) cutoff in choosing the heat waves to plot
+computeplotnycdataduringhws=0;%whether to compute & plot various characteristics of the observed station data, both for all and selected hw days (10 sec)
+    computationpart=1;
+    plotpart=1;
+dokmeansstnwbt=0;
 
-usingdailyclimoddata=0;     %these two important options are set in readnycdata & are included here for transparency
-                                %but can't really be changed now
 usinghourlynrccdata=1;     
 %*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~%*&?/,~
 
@@ -84,6 +124,8 @@ prdlabels={'Atlantic City A';'Bridgeport A';'JFK A';'LaGuardia A';'Newark A';'Wh
     'Central Park';'Brooklyn';'Trenton A';'Trenton';'Atlantic City';'Toms River';'Philadelphia A';...
     'Teterboro A';'Little Falls';'Paterson';'Jersey City';'Islip A';'Scarsdale';'Dobbs Ferry';...
     'Port Jervis';'Mineola'};
+marqueecities=['Atl City A';'Bridgeport';'     JFK A';'     LGA A';'  Newark A';...
+    '  White Pl';' Central P';'  Brooklyn'];
 marqueecitiesd=['Atl City A';'Bridgeport';'     JFK A';'     LGA A';'  Newark A';...
     '  White Pl';' Central P';'  Brooklyn'];
 allcitiesd=['    Atl City A';'    Bridgeport';'         JFK A';'   LaGuardia A';'      Newark A';...
@@ -118,6 +160,8 @@ stndailyPORs=[7 1958 7 2015;7 1948 7 2015;8 1948 7 2015;7 1940 7 2015;...
     1 1893 1 1974;12 1905 6 1996;1 1984 7 2015;1 1904 6 1991;10 1945 6 2012;1 1893 7 2015;1 1938 12 2011];
 
 
+numyearsh=75; %max possible for hourly NRCC station obs
+mf=3.28; %meter-foot conversion
 stnlocs1=zeros(8,3); %lat, lon, and elev for each station in group 1 (marquee)
 stnlocs1(:,1)=[39.449;41.158;40.639;40.779;40.683;41.067;40.779;40.594];
 stnlocs1(:,2)=[-74.567;-73.129;-73.762;-73.880;-74.169;-73.708;-73.969;-73.981];
@@ -150,19 +194,26 @@ m1s=1;m2s=32;m3s=60;m4s=91;m5s=121;m6s=152;m7s=182;m8s=213;m9s=244;m10s=274;m11s
 mpr={'Jan';'Feb';'Mar';'Apr';'May';'Jun';'Jul';'Aug';'Sep';'Oct';'Nov';'Dec'};
 sa=1; %selected airport to compute histograms of differences; number from prefixes list
 firstandlast=0; %whether all stns are currently included
-maxhwlength=10; %no heat wave can go longer (checked that there aren't any longer)
+if highpct==0.975
+    maxhwlength=10; %longest heat wave possible
+elseif highpct==0.925
+    maxhwlength=17;
+else
+    disp('Please choose a new maximum heat-wave length');return;
+end 
 if relativescores==1;relabs='Relative';else relabs='Absolute';end
 if anomfromjjaavg==1;anomorabs='Anomalous';else anomorabs='Avg';end
+if calchwseverityscores==1 || makehwseverityscatterplot==1
+    method='1';
+elseif calchwavgtwbt==1
+    method='2';
+end
 temp=load('-mat','soilm_narr_01_01');
 soilm_narr_01_01=temp(1).soilm_0000_01_01;
-lats=soilm_narr_01_01{1};lons=soilm_narr_01_01{2}; %ditto
+lats=soilm_narr_01_01{1};lons=soilm_narr_01_01{2}; %just a way to get the NARR lat/lon arrays
 
 
-if usingdailyclimoddata==1
-    daycol=2;yrcol=3;numstns=numstnsd;numyears=numyearsd;syear=1865;
-    pr=prd;prlabels=prdlabels;marqueecities=marqueecitiesd;allcities=allcitiesd;
-    cities=citiesd;
-elseif usinghourlynrccdata==1
+if usinghourlynrccdata==1
     daycol=3;yrcol=4;numstns=numstnsh;numyears=numyearsh;syear=1941;
     pr=prh;prcodes=prhcodes;prlabels=prhlabels;marqueecities=marqueecities;allcities=allcitiesh;cities=citiesh;
 end
@@ -187,10 +238,10 @@ if createnewvectors==1
      cleanmonthlymaxes=cell(numstns,12);
      cleanmonthlymins=cell(numstns,12);
      cleanmonthlyavgs=cell(numstns,12);
-     cmmaxwy=cell(numstns,numyearsd,12);
-     cmminwy=cell(numstns,numyearsd,12);
-     cmmaxwy1D=zeros(numyearsd*12,numstns,3); %3 cols, for temp, day of year, year
-     cmminwy1D=zeros(numyearsd*12,numstns,3);
+     %cmmaxwy=cell(numstns,numyearsd,12);
+     %cmminwy=cell(numstns,numyearsd,12);
+     %cmmaxwy1D=zeros(numyearsd*12,numstns,3); %3 cols, for temp, day of year, year
+     %cmminwy1D=zeros(numyearsd*12,numstns,3);
 end
 
 
@@ -218,113 +269,82 @@ if displaystnsperyear==1
     figure(figc);clf;figc=figc+1;years=syear:2015;
     plot(years,stnsperyear);xlim([syear 2015]);hold on;
     threshvals=0.5*numstns*ones(numyears,1);plot(years,threshvals,'r');
-    title('Number of stations per year that are at least 95% complete','FontSize',16,'FontWeight','bold');
+    title('Number of stations per year that are at least 95% complete','FontName','Arial','FontSize',16,'FontWeight','bold');
 end
                 
 
 if computebasicstats==1
-    for stnc=1:stnl
+    for stnc=stnf:stnl
         fprintf('Current station is %d\n',stnc);
         prefix=pr(stnc);  
-        tempmax=sortrows(dailymaxvecs1D{stnc},-1);totalnumdays=size(tempmax,1);
-        format shortG;
-        %hottest 5% and 0.5% of daily-T maxima
-        eval(['hottest5percmax' char(prefix) '=tempmax(1:round(5*totalnumdays/100),:);']);
-        eval(['hottest0point5percmax' char(prefix) '=tempmax(1:round(0.5*totalnumdays/100),:);']);
-        eval(['length5perc' char(prefix) '=round(5*totalnumdays/100);']);
-        eval(['length0point5perc' char(prefix) '=round(0.5*totalnumdays/100);']);
-        %...of minima (CLIMOD daily only)
-        tempmin=sortrows(dailyminvecs1D{stnc},-1);
-        eval(['hottest5percmin' char(prefix) '=tempmin(1:round(5*totalnumdays/100),:);']);
-        eval(['hottest0point5percmin' char(prefix) '=tempmin(1:round(0.5*totalnumdays/100),:);']);
 
         %All daily data for each month of the year with missing values excluded
-        for ct=1:12
-            if ct==12          
-                sd=eval(sprintf('m%us',ct));
-                ed=366;
-            else
-                sd=eval(sprintf('m%us',ct));
-                ed=eval(sprintf('m%us',ct+1))-1;
-            end
-            cleanmonthlymaxes{stnc,ct}=...
-                dailymaxvecs{stnc}(sd:ed,1:size(dailymaxvecs{stnc},2));
-            cleanmonthlymaxes{stnc,ct}=...
-                cleanmonthlymaxes{stnc,ct}(cleanmonthlymaxes{stnc,ct}>-50);
-            cleanmonthlymins{stnc,ct}=...
-                dailyminvecs{stnc}(sd:ed,1:size(dailyminvecs{stnc},2));
-            cleanmonthlymins{stnc,ct}=...
-                cleanmonthlymins{stnc,ct}(cleanmonthlymins{stnc,ct}>-50);
-            if usinghourlynrccdata~=1
-                cleanmonthlyavgs{stnc,ct}=...
-                    dailyavgvecs{stnc}(sd:ed,1:size(dailyavgvecs{stnc},2));
-                cleanmonthlyavgs{stnc,ct}=...
-                    cleanmonthlyavgs{stnc,ct}(cleanmonthlyavgs{stnc,ct}>-40);
-            end
-        end
-        %Enhanced version of cleanmonthlyxxx with absolute year identified
-        yc=1;totdayc=1;
-        for yc=1:numyears
-            %yc=4,8,etc. are leap years
+        if computedailystuff==1
             for ct=1:12
-                if rem(yc,4)==0
-                    if ct==12          
-                        sd=eval(sprintf('m%usl',ct));
-                        ed=366;
-                    else
-                        sd=eval(sprintf('m%usl',ct));
-                        ed=eval(sprintf('m%usl',ct+1))-1;
-                    end
-                elseif rem(yc,4)~=0
-                    if ct==12          
-                        sd=eval(sprintf('m%us',ct));
-                        ed=365;
-                    else
-                        sd=eval(sprintf('m%us',ct));
-                        ed=eval(sprintf('m%us',ct+1))-1;
-                    end
+                if ct==12          
+                    sd=eval(sprintf('m%us',ct));
+                    ed=366;
+                else
+                    sd=eval(sprintf('m%us',ct));
+                    ed=eval(sprintf('m%us',ct+1))-1;
                 end
-                cmmaxwy{stnc,yc,ct}=dailymaxvecs{stnc}(sd:ed,yc);
-                cmminwy{stnc,yc,ct}=dailyminvecs{stnc}(sd:ed,yc);
-                cmmaxwy1D(totdayc:totdayc+ed-sd,stnc,1)=dailymaxvecs{stnc}(sd:ed,yc);
-                cmminwy1D(totdayc:totdayc+ed-sd,stnc,1)=dailyminvecs{stnc}(sd:ed,yc);
-                cmmaxwy1D(totdayc:totdayc+ed-sd,stnc,2)=ct*ones(ed-sd+1,1);
-                cmminwy1D(totdayc:totdayc+ed-sd,stnc,2)=ct*ones(ed-sd+1,1);
-                cmmaxwy1D(totdayc:totdayc+ed-sd,stnc,3)=(yc+syear-1)*ones(ed-sd+1,1);
-                cmminwy1D(totdayc:totdayc+ed-sd,stnc,3)=(yc+syear-1)*ones(ed-sd+1,1);
-                totdayc=totdayc+ed-sd+1;
+                cleanmonthlymaxes{stnc,ct}=...
+                    dailymaxvecs{stnc}(sd:ed,1:size(dailymaxvecs{stnc},2));
+                cleanmonthlymaxes{stnc,ct}=...
+                    cleanmonthlymaxes{stnc,ct}(cleanmonthlymaxes{stnc,ct}>-50);
+                cleanmonthlymins{stnc,ct}=...
+                    dailyminvecs{stnc}(sd:ed,1:size(dailyminvecs{stnc},2));
+                cleanmonthlymins{stnc,ct}=...
+                    cleanmonthlymins{stnc,ct}(cleanmonthlymins{stnc,ct}>-50);
+                if usinghourlynrccdata~=1
+                    cleanmonthlyavgs{stnc,ct}=...
+                        dailyavgvecs{stnc}(sd:ed,1:size(dailyavgvecs{stnc},2));
+                    cleanmonthlyavgs{stnc,ct}=...
+                        cleanmonthlyavgs{stnc,ct}(cleanmonthlyavgs{stnc,ct}>-40);
+                end
             end
-        end
-
-        %Mean monthly maxima, minima, and avg for each station
-        for month=1:12
-            monthlymeanmaxes{stnc}(month)=...
-                mean(mean(cleanmonthlymaxes{stnc,month}));
-            monthlymeanmins{stnc}(month)=...
-                mean(mean(cleanmonthlymins{stnc,month}));
-            monthlymeanavgs{stnc}(month)=...
-                mean(mean(cleanmonthlyavgs{stnc,month}));
-        end
-
-        %Quick computation of station-specific daily-T percentiles
-        prctilestocompute=[5;10;25;50;75;90;95];
-        for ii=1:length(prctilestocompute)
-            for month=1:12
-                monthlyprctilemaxes{stnc}(month,ii)=...
-                    prctile(cleanmonthlymaxes{stnc,month},prctilestocompute(ii));
-                monthlyprctilemins{stnc}(month,ii)=...
-                    prctile(cleanmonthlymins{stnc,month},prctilestocompute(ii));
-                monthlyprctileavgs{stnc}(month,ii)=...
-                    prctile(cleanmonthlyavgs{stnc,month},prctilestocompute(ii));
+            %Enhanced version of cleanmonthlyxxx with absolute year identified
+            yc=1;totdayc=1;
+            for yc=1:numyears
+                %yc=4,8,etc. are leap years
+                for ct=1:12
+                    if rem(yc,4)==0
+                        if ct==12          
+                            sd=eval(sprintf('m%usl',ct));
+                            ed=366;
+                        else
+                            sd=eval(sprintf('m%usl',ct));
+                            ed=eval(sprintf('m%usl',ct+1))-1;
+                        end
+                    elseif rem(yc,4)~=0
+                        if ct==12          
+                            sd=eval(sprintf('m%us',ct));
+                            ed=365;
+                        else
+                            sd=eval(sprintf('m%us',ct));
+                            ed=eval(sprintf('m%us',ct+1))-1;
+                        end
+                    end
+                    cmmaxwy{stnc,yc,ct}=dailymaxvecs{stnc}(sd:ed,yc);
+                    cmminwy{stnc,yc,ct}=dailyminvecs{stnc}(sd:ed,yc);
+                    cmmaxwy1D(totdayc:totdayc+ed-sd,stnc,1)=dailymaxvecs{stnc}(sd:ed,yc);
+                    cmminwy1D(totdayc:totdayc+ed-sd,stnc,1)=dailyminvecs{stnc}(sd:ed,yc);
+                    cmmaxwy1D(totdayc:totdayc+ed-sd,stnc,2)=ct*ones(ed-sd+1,1);
+                    cmminwy1D(totdayc:totdayc+ed-sd,stnc,2)=ct*ones(ed-sd+1,1);
+                    cmmaxwy1D(totdayc:totdayc+ed-sd,stnc,3)=(yc+syear-1)*ones(ed-sd+1,1);
+                    cmminwy1D(totdayc:totdayc+ed-sd,stnc,3)=(yc+syear-1)*ones(ed-sd+1,1);
+                    totdayc=totdayc+ed-sd+1;
+                end
             end
         end
         
         %Not-quite-as-quick computation of station-specific hourly integrated T
-        %and WBT percentiles for JJA
+            %and WBT percentiles for JJA
         %Due to heat-wave definition being used (see DefinitionsNotes), p81
-        %and p97.5 are the ones of the most interest
+            %and p97.5 are the ones of the most interest, though this lowpct
+            %and highpct respectively can be modified as desired
         %If a heat wave crosses month lines, thresholds for continuation
-        %change as appropriate, weighting by the # of days in each month
+            %change as appropriate, weighting by the # of days in each month
         %Dimensions of integxxxprctiles are station|month|hw length|prctile
         for month=monthiwf:monthiwl
             for potentialhwlength=1:maxhwlength
@@ -332,7 +352,7 @@ if computebasicstats==1
                 for i=1:size(hourlytvecs{stnc},1)
                     if hourlytvecs{stnc}(i,3)==month
                         if i+24*potentialhwlength-1<=size(hourlytvecs{stnc},1) %so we know it's not right at the end
-                            if hourlytvecs{stnc}(i+24*potentialhwlength-1,3)==month %segregate by month
+                            if hourlytvecs{stnc}(i+24*potentialhwlength-1,3)==month %period has to be entirely within month
                                 integTvalue=0;integWBTvalue=0;                 %go ahead & calculate hourly average
                                 if min(hourlytvecs{stnc}(i:i+24*potentialhwlength-1,5))>-50 %no missing values allowed
                                     integTvalue=sum(hourlytvecs{stnc}(i:i+24*potentialhwlength-1,5));
@@ -352,10 +372,10 @@ if computebasicstats==1
                 integWBTvecsaveforlater{stnc,month,potentialhwlength}=integWBTvec;
                 %disp(validTc);disp(validWBTc);
                 %Percentiles for each station
-                integTprctiles(stnc,month,potentialhwlength,1)=quantile(integTvec,0.975)/(potentialhwlength*24);
-                integTprctiles(stnc,month,potentialhwlength,2)=quantile(integTvec,0.81)/(potentialhwlength*24);
-                integWBTprctiles(stnc,month,potentialhwlength,1)=quantile(integWBTvec,0.975)/(potentialhwlength*24);
-                integWBTprctiles(stnc,month,potentialhwlength,2)=quantile(integWBTvec,0.81)/(potentialhwlength*24);
+                integTprctiles(stnc,month,potentialhwlength,1)=quantile(integTvec,highpct)/(potentialhwlength*24);
+                integTprctiles(stnc,month,potentialhwlength,2)=quantile(integTvec,lowpct)/(potentialhwlength*24);
+                integWBTprctiles(stnc,month,potentialhwlength,1)=quantile(integWBTvec,highpct)/(potentialhwlength*24);
+                integWBTprctiles(stnc,month,potentialhwlength,2)=quantile(integWBTvec,lowpct)/(potentialhwlength*24);
             end
         end           
     end
@@ -366,27 +386,31 @@ if computebasicstats==1
             regTvecsavedforlater{month,potentialhwlength}=[integTvecsaveforlater{3,month,potentialhwlength}';...
                 integTvecsaveforlater{4,month,potentialhwlength}';integTvecsaveforlater{5,month,potentialhwlength}'];
             regTprctiles(month,potentialhwlength,1)=...
-                            quantile(regTvecsavedforlater{month,potentialhwlength},0.975)/(potentialhwlength*24);
+                            quantile(regTvecsavedforlater{month,potentialhwlength},highpct)/(potentialhwlength*24);
             regWBTvecsavedforlater{month,potentialhwlength}=[integWBTvecsaveforlater{3,month,potentialhwlength}';...
                 integWBTvecsaveforlater{4,month,potentialhwlength}';integWBTvecsaveforlater{5,month,potentialhwlength}'];
             regWBTprctiles(month,potentialhwlength,1)=...
-                            quantile(regWBTvecsavedforlater{month,potentialhwlength},0.975)/(potentialhwlength*24);
+                            quantile(regWBTvecsavedforlater{month,potentialhwlength},highpct)/(potentialhwlength*24);
         end
     end
     
     figure(figc);clf;
     x=1:maxhwlength;
-    plot(x,squeeze(integWBTprctiles(7,6,:,1)));hold on; %dims are station;month;hw length;prctiles
-    plot(x,squeeze(integWBTprctiles(7,7,:,1)),'r');
-    plot(x,squeeze(integWBTprctiles(7,8,:,1)),'g');
-    plot(x,squeeze(integWBTprctiles(5,6,:,1)),'bo-');
-    plot(x,squeeze(integWBTprctiles(5,7,:,1)),'ro-');
-    plot(x,squeeze(integWBTprctiles(5,8,:,1)),'go-');
-    title('97.5th Percentile of Hourly-Average WBT by Heat-Wave Length for June, July, and August for Central Park & Newark',...
-        'FontSize',16,'FontWeight','bold');
+    if stnl>=7
+        plot(x,squeeze(integWBTprctiles(7,6,1:maxhwlength,1)));hold on; %dims are station;month;hw length;prctiles
+        plot(x,squeeze(integWBTprctiles(7,7,1:maxhwlength,1)),'r');
+        plot(x,squeeze(integWBTprctiles(7,8,1:maxhwlength,1)),'g');
+    end
+    plot(x,squeeze(integWBTprctiles(5,6,1:maxhwlength,1)),'bo-');
+    plot(x,squeeze(integWBTprctiles(5,7,1:maxhwlength,1)),'ro-');
+    plot(x,squeeze(integWBTprctiles(5,8,1:maxhwlength,1)),'go-');
+    title(sprintf('%dth Percentile of Hourly-Average WBT by Heat-Wave Length for June, July, and August for Central Park & Newark',highpct),...
+        'FontName','Arial','FontSize',16,'FontWeight','bold');
     xlabel('Heat-Wave Length (Days)','FontSize',14);
     ylabel('Deg C','FontSize',14);
     legend('CP Jun','CP Jul','CP Aug','EWR Jun','EWR Jul','EWR Aug');
+    
+    save(strcat(curDir,'basicstuff'),'regTvecsavedforlater','integTprctiles','integWBTprctiles','-append');
 end
 
 
@@ -396,13 +420,16 @@ if showdefnplot==1
     months=[7;6];starthour=[635857;652537];monthnames={'July';'June'};
     eventnames={'Jul 16-21, 2013';'Jun 11-13, 2015'};
     ylowerlims=[24;18];yupperlims=[33;30];
-    for numplot=1:2
+    for numplot=1:1
         mhere=months(numplot);shhere=starthour(numplot);mherename=monthnames{numplot};
         eherename=eventnames{numplot};ylowerlim=ylowerlims(numplot);yupperlim=yupperlims(numplot);
         figure(figc);clf;figc=figc+1;
+        curpart=1;highqualityfiguresetup;
         x=1:maxhwlength;
-        plot(x,squeeze(integTprctiles(7,mhere,:,1)),':','LineWidth',2);hold on; %Central Park, (month), 97.5th percentile
-        plot(x,squeeze(integTprctiles(7,mhere,:,2)),':','Color',colors('light purple'),'LineWidth',2); %81st percentile
+        plot(x,squeeze(integTprctiles(7,mhere,1:maxhwlength,1))','-.','LineWidth',3,'color',colors('turquoise'));hold on; 
+            %Central Park, (month), 97.5th percentile
+        plot(x,squeeze(integTprctiles(7,mhere,1:maxhwlength,2))','-.','Color',colors('purple'),'LineWidth',3);
+            %81st percentile
         %From already having done this whole script, I know that the second-last Central Park heat
         %wave occurred on Jul 16-21, 2013, corresponding to hours 635857-636000
         %The last one occurred Jun 11-13, 2015, or hours 652537-652608
@@ -416,14 +443,17 @@ if showdefnplot==1
         dailyavg(5)=mean(hourlytvecs{7}(shhere+96:shhere+119,5));dailyavg(6)=mean(hourlytvecs{7}(shhere+120:shhere+143,5));
         dailyavg(7)=mean(hourlytvecs{7}(shhere+144:shhere+167,5));dailyavg(8)=mean(hourlytvecs{7}(shhere+168:shhere+191,5));
         dailyavg(9)=mean(hourlytvecs{7}(shhere+192:shhere+215,5));dailyavg(10)=mean(hourlytvecs{7}(shhere+216:shhere+239,5));
-        plot(x,integmean,'r','LineWidth',2);
-        plot(x,dailyavg,'Color',colors('light brown'),'LineWidth',2);
+        plot(x,integmean,'r','LineWidth',3);
+        plot(x,dailyavg,'Color',colors('light brown'),'LineWidth',3);
         ylim([ylowerlim yupperlim]);
-        label1=sprintf('%s 97.5th Percentile',mherename);label2=sprintf('%s 81st Percentile',mherename);
-        legend(label1,label2,'Cumulative Avg over Event','Individual-Day Avgs');
+        set(gca,'FontSize',14,'FontWeight','bold','FontName','Arial');
+        label1=sprintf('%s %0.1f%s Percentile',mherename,highpct*100,ordinalindicator(highpct*100));
+        label2=sprintf('%s %0.0f%s Percentile',mherename,lowpct*100,ordinalindicator(lowpct*100));
+        leg=legend(label1,label2,'Cumulative Avg over Event','Individual-Day Avgs');
+        set(leg,'FontSize',14,'FontWeight','bold','FontName','Arial');
         %Determine algorithmically what killed heat wave, and mark its end with a nice big |
-        endofhwbyindivday=max(polyxpoly(x,dailyavg,x,squeeze(integTprctiles(7,mhere,:,2))));
-        endofhwbyintegval=max(polyxpoly(x,integmean,x,squeeze(integTprctiles(7,mhere,:,1))));
+        endofhwbyindivday=max(polyxpoly(x,dailyavg,x,squeeze(integTprctiles(7,mhere,1:maxhwlength,2))));
+        endofhwbyintegval=max(polyxpoly(x,integmean,x,squeeze(integTprctiles(7,mhere,1:maxhwlength,1))));
         [endofhw,whichresp]=min([endofhwbyindivday endofhwbyintegval]);
         if whichresp==1
             text(round2(endofhw,1,'floor'),dailyavg(round2(endofhw,1,'floor')),'|',...
@@ -432,10 +462,13 @@ if showdefnplot==1
             text(round2(endofhw,1,'floor'),integmean(round2(endofhw,1,'floor')),'|',...
                 'FontSize',40,'FontWeight','bold','FontName','Arial');
         end
+        %Finish things off with title & axis labels
         title(sprintf('Illustration of Heat-Wave Definition, Using Heat Wave of %s at Central Park',eherename),...
-            'FontSize',16,'FontWeight','bold','FontName','Arial');
+            'FontSize',18,'FontWeight','bold','FontName','Arial');
         xlabel('Potential Heat-Wave Length (Days)','FontSize',16,'FontWeight','bold','FontName','Arial');
         ylabel('Temperature (deg C)','FontSize',16,'FontWeight','bold','FontName','Arial');
+        set(gca,'FontSize',18);
+        curpart=2;figloc=curDir;figname='defnplot';highqualityfiguresetup;
     end
 end
 
@@ -488,145 +521,10 @@ if usinghourlynrccdata==1
                 end
             end
         end
+        save(strcat(curDir,'basicstuff'),'hourly90prctiles','-append');
     end
 end
 
-
-%Based on daily percentiles, create station catalogues of JJA heat waves ranked by severity
-%Each station is entitled to its own heat waves
-%THIS IS OLD AND SCHEDULED FOR DISMANTLEMENT
-if makeheatwaverankingold==1
-    for stnc=1:numstns
-        numhws=0;consechotdayc=0;sotx=0;sotn=0; %last two are sums over threshold of max & min
-        for jj=1:size(dailymaxvecs1D{stnc},1)
-            if dailymaxvecs1D{stnc}(jj,daycol)>=m6sl && dailymaxvecs1D{stnc}(jj,daycol)<m9s %JJA
-                if dailymaxvecs1D{stnc}(jj,daycol)<m7sl %June
-                    if dailymaxvecs1D{stnc}(jj,1)>=monthlyprctilemaxes{stnc}(6,6)
-                        consechotdayc=consechotdayc+1;
-                        thishwmaxes(consechotdayc)=dailymaxvecs1D{stnc}(jj,1);
-                        %a heatwave even though min temp may or may not be above its threshold
-                        thishwmins(consechotdayc)=dailyminvecs1D{stnc}(jj,1);
-                        if dailymaxvecs1D{stnc}(jj,1)>-50
-                            sotx=sotx+dailymaxvecs1D{stnc}(jj,1)-monthlyprctilemaxes{stnc}(6,6);
-                        end
-                        %disp(jj);disp(dailymaxvecs1D{stnc}(jj,1));
-                        %disp(monthlyprctilemaxes{stnc}(6,6));disp(sotx);
-                        if dailyminvecs1D{stnc}(jj,1)>-50
-                            sotn=sotn+dailyminvecs1D{stnc}(jj,1)-monthlyprctilemins{stnc}(6,6);
-                        end
-                    elseif dailyminvecs1D{stnc}(jj,1)>=monthlyprctilemins{stnc}(6,6)
-                        consechotdayc=consechotdayc+1;
-                        thishwmaxes(consechotdayc)=dailymaxvecs1D{stnc}(jj,1);
-                        thishwmins(consechotdayc)=dailyminvecs1D{stnc}(jj,1);
-                        if dailymaxvecs1D{stnc}(jj,1)>-50 %just to ensure it's not missing
-                            sotx=sotx+dailymaxvecs1D{stnc}(jj,1)-monthlyprctilemaxes{stnc}(6,6);
-                        end
-                        if dailyminvecs1D{stnc}(jj,1)>-50
-                            sotn=sotn+dailyminvecs1D{stnc}(jj,1)-monthlyprctilemins{stnc}(6,6);
-                        end
-                    else %a cool day...
-                        if consechotdayc>=3 %...that ended a heatwave
-                            numhws=numhws+1;
-                            hwregisterbyT{stnc}(numhws,1)=dailymaxvecs1D{stnc}(jj,daycol)- ...
-                                consechotdayc;
-                            hwregisterbyT{stnc}(numhws,2)=dailymaxvecs1D{stnc}(jj,daycol)-1;
-                            hwregisterbyT{stnc}(numhws,3)=dailymaxvecs1D{stnc}(jj,yrcol);
-                            hwregisterbyT{stnc}(numhws,4)=max(thishwmaxes);
-                            hwregisterbyT{stnc}(numhws,5)=max(thishwmins);
-                            hwregisterbyT{stnc}(numhws,6)=sotx;
-                            hwregisterbyT{stnc}(numhws,7)=sotn;
-                            hwregisterbyT{stnc}(numhws,8)=sotx+sotn;
-                        end
-                        consechotdayc=0;
-                        thishwmaxes=0;thishwmins=0;
-                        sotx=0;sotn=0;
-                    end
-                elseif dailymaxvecs1D{stnc}(jj,daycol)>=m7sl && dailymaxvecs1D{stnc}(jj,daycol)<m8s
-                    if dailymaxvecs1D{stnc}(jj,1)>=monthlyprctilemaxes{stnc}(7,6)
-                        consechotdayc=consechotdayc+1;
-                        thishwmaxes(consechotdayc)=dailymaxvecs1D{stnc}(jj,1);
-                        thishwmins(consechotdayc)=dailyminvecs1D{stnc}(jj,1);
-                        if dailymaxvecs1D{stnc}(jj,1)>-50
-                            sotx=sotx+dailymaxvecs1D{stnc}(jj,1)-monthlyprctilemaxes{stnc}(7,6);
-                        end
-                        if dailyminvecs1D{stnc}(jj,1)>-50
-                            sotn=sotn+dailyminvecs1D{stnc}(jj,1)-monthlyprctilemins{stnc}(7,6);
-                        end
-                    elseif dailyminvecs1D{stnc}(jj,1)>=monthlyprctilemins{stnc}(7,6)
-                        consechotdayc=consechotdayc+1;
-                        thishwmaxes(consechotdayc)=dailymaxvecs1D{stnc}(jj,1);
-                        thishwmins(consechotdayc)=dailyminvecs1D{stnc}(jj,1);
-                        if dailymaxvecs1D{stnc}(jj,1)>-50
-                            sotx=sotx+dailymaxvecs1D{stnc}(jj,1)-monthlyprctilemaxes{stnc}(7,6);
-                        end
-                        if dailyminvecs1D{stnc}(jj,1)>-50
-                            sotn=sotn+dailyminvecs1D{stnc}(jj,1)-monthlyprctilemins{stnc}(7,6);
-                        end
-                    else
-                        if consechotdayc>=3 %a heatwave just ended
-                            numhws=numhws+1;
-                            hwregisterbyT{stnc}(numhws,1)=...
-                                dailymaxvecs1D{stnc}(jj,daycol)-consechotdayc;
-                            hwregisterbyT{stnc}(numhws,2)=dailymaxvecs1D{stnc}(jj,daycol)-1;
-                            hwregisterbyT{stnc}(numhws,3)=dailymaxvecs1D{stnc}(jj,yrcol);
-                            hwregisterbyT{stnc}(numhws,4)=max(thishwmaxes);
-                            hwregisterbyT{stnc}(numhws,5)=max(thishwmins);
-                            hwregisterbyT{stnc}(numhws,6)=sotx;
-                            hwregisterbyT{stnc}(numhws,7)=sotn;
-                            hwregisterbyT{stnc}(numhws,8)=sotx+sotn;
-                        end
-                        consechotdayc=0;
-                        thishwmaxes=0;thishwmins=0;
-                        sotx=0;sotn=0;
-                    end
-                else %August
-                    if dailymaxvecs1D{stnc}(jj,1)>=monthlyprctilemaxes{stnc}(8,6)
-                        consechotdayc=consechotdayc+1;
-                        thishwmaxes(consechotdayc)=dailymaxvecs1D{stnc}(jj,1);
-                        thishwmins(consechotdayc)=dailyminvecs1D{stnc}(jj,1);
-                        if dailymaxvecs1D{stnc}(jj,1)>-50
-                            sotx=sotx+dailymaxvecs1D{stnc}(jj,1)-monthlyprctilemaxes{stnc}(8,6);
-                        end
-                        if dailyminvecs1D{stnc}(jj,1)>-50
-                            sotn=sotn+dailyminvecs1D{stnc}(jj,1)-monthlyprctilemins{stnc}(8,6);
-                        end
-                    elseif dailyminvecs1D{stnc}(jj,1)>=monthlyprctilemins{stnc}(8,6)
-                        consechotdayc=consechotdayc+1;
-                        thishwmaxes(consechotdayc)=dailymaxvecs1D{stnc}(jj,1);
-                        thishwmins(consechotdayc)=dailyminvecs1D{stnc}(jj,1);
-                        if dailymaxvecs1D{stnc}(jj,1)>-50
-                            sotx=sotx+dailymaxvecs1D{stnc}(jj,1)-monthlyprctilemaxes{stnc}(8,6);
-                        end
-                        if dailyminvecs1D{stnc}(jj,1)>-50
-                            sotn=sotn+dailyminvecs1D{stnc}(jj,1)-monthlyprctilemins{stnc}(8,6);
-                        end
-                    else
-                        if consechotdayc>=3 %a heatwave just ended
-                            numhws=numhws+1;
-                            hwregisterbyT{stnc}(numhws,1)=...
-                                dailymaxvecs1D{stnc}(jj,daycol)-consechotdayc;
-                            hwregisterbyT{stnc}(numhws,2)=dailymaxvecs1D{stnc}(jj,daycol)-1;
-                            hwregisterbyT{stnc}(numhws,3)=dailymaxvecs1D{stnc}(jj,yrcol);
-                            hwregisterbyT{stnc}(numhws,4)=max(thishwmaxes);
-                            hwregisterbyT{stnc}(numhws,5)=max(thishwmins);
-                            hwregisterbyT{stnc}(numhws,6)=sotx;
-                            hwregisterbyT{stnc}(numhws,7)=sotn;
-                            hwregisterbyT{stnc}(numhws,8)=sotx+sotn;
-                        end
-                        consechotdayc=0;
-                        thishwmaxes=0;thishwmins=0;
-                        sotx=0;sotn=0;
-                    end
-                end
-            elseif dailymaxvecs1D{stnc}(jj,daycol)==m9s %Sep 1, all heat waves must end par def'n
-                consechotdayc=0;
-            end
-        end
-
-        %Sort the result to have an ordered list of heat waves by severity score
-        hwsorted{stnc}=sortrows(hwregisterbyT{stnc},-8);
-    end
-end
 
 %Chronological catalogue of heat waves with new hourly-integrated definition
 %This means heat waves are equally likely in each month (but this is good,
@@ -636,22 +534,22 @@ end
 %waves are defined according to what's going on at JFK, LGA, and Newark)
 %Look for 3-day heat waves, then add one day at a time and see if heat wave continues or ends
 if makeheatwaverankingnew==1
-    %hwregisterbyT={};hwregisterbyWBT={};hwregister={};
-    %reghwbyTstarts=0;reghwbyWBTstarts=0;hwbyTstarthours=0;hwbyWBTstarthours=0;
+    hwregisterbyT={};hwregisterbyWBT={};hwregister={};
+    reghwbyTstarts=0;reghwbyWBTstarts=0;hwbyTstarthours=0;hwbyWBTstarthours=0;
     hoursofhws={}; %preserve the hours of heat waves within hourlytvecs for later retrieval
     for variab=1:1 %T and WBT rankings are separate
         numreghws=0;reghwdays=0;reghwstarts=0;hwstarthours=0;
         reghwstartendhours=0;
         if variab==1;integXprctiles=integTprctiles;col=5;suffix1={'byT'};end %dims are stn|month|hwlength|rankby
         if variab==2;integXprctiles=integWBTprctiles;col=14;suffix1={'byWBT'};end
-        for stnc=1:stnl
+        for stnc=stnf:stnl
             numhws=0;consechotdayc=0;i=1;
-            while i<=size(hourlytvecs{stnc},1)-10*24
+            while i<=size(hourlytvecs{stnc},1)-maxhwlength*24
                 if min(hourlytvecs{stnc}(i:i+71,col))>-50 %no missing data allowed
                     month=hourlytvecs{stnc}(i,3);
                     if month>=monthiwf && month<=monthiwl %search either in JJA or in MJJAS
                         integX=sum(hourlytvecs{stnc}(i:i+71,col))/72;
-                        if integX>=integXprctiles(stnc,month,3,1) %meets the minimum reqts for a heat wave by T
+                        if integX>=integXprctiles(stnc,month,3,1) %meets the minimum reqts for a heat wave
                             hwlength=3;%fprintf('Starting heat wave # %d',numhws);
                             hwregister{stnc}(numhws+1,1)=...
                                 DatetoDOY(hourlytvecs{stnc}(i,3),hourlytvecs{stnc}(i,2),hourlytvecs{stnc}(i,4));
@@ -661,11 +559,6 @@ if makeheatwaverankingnew==1
                             potentialnewdaysum=sum(hourlytvecs{stnc}(i+(hwlength*24):i+(hwlength+1)*24-1,col))/24;
                             hwgoeson=1;
                             while hwlength<=maxhwlength && hwgoeson==1 %now, see about extending the heat wave beyond 3 days
-                                %disp('line 607');disp(integXtest);disp(potentialnewdaysum);
-                                %if hwlength<maxhwlength && curmonth<=8
-                                %    disp(integXprctiles(stnc,curmonth,hwlength+1,1));
-                                %    disp(integXprctiles(stnc,curmonth,1,2));
-                                %end
                                 if hwlength<maxhwlength;curmonth=hourlytvecs{stnc}(i+(hwlength+1)*24,3);end
                                 if hwlength==maxhwlength || curmonth==monthiwl+1 %%%heat wave needs to end%%%
                                     hwgoeson=0;numhws=numhws+1;
@@ -680,7 +573,7 @@ if makeheatwaverankingnew==1
                                     hwlength=hwlength+1;%disp(hwlength);
                                     integXtest=sum(hourlytvecs{stnc}(i:i+(hwlength+1)*24-1,col))/((hwlength+1)*24);
                                     potentialnewdaysum=sum(hourlytvecs{stnc}(i+(hwlength*24):i+(hwlength+1)*24-1,col))/24;
-                                else %%%heat wave is no longer extended%%%
+                                else %%%heat wave fizzles out and is no longer extended%%%
                                     hwgoeson=0;numhws=numhws+1;
                                     hwregister{stnc}(numhws,2)=...
                                         DatetoDOY(hourlytvecs{stnc}(i+hwlength*24-1,3),hourlytvecs{stnc}(i+hwlength*24-1,2),...
@@ -709,7 +602,7 @@ if makeheatwaverankingnew==1
         %2 out of 3 of LGA, JFK, and Newark are experiencing a heat wave)
         register=eval(['hwregister' char(suffix1)]);c=1;
         hwchere=0;stnthatstartedit=0;stninthemiddle=0;stnthatfinishedit=0;
-        for row=1:100;thishwhasbeennoted(row,3)=0;thishwhasbeennoted(row,4)=0;end
+        for row=1:300;thishwhasbeennoted(row,3)=0;thishwhasbeennoted(row,4)=0;end
         for stnc=3:4 %all possible heat-wave days must show up in at least one of these
             for row=1:size(register{stnc},1)
                 for potentialhwday=register{stnc}(row,1):register{stnc}(row,2)
@@ -771,7 +664,7 @@ if makeheatwaverankingnew==1
         %New loop for weeding out stray hot days that aren't part of >=3-day
         %events, creating the array reghwdayscl, a 'clean' register of
         %regional heat waves
-        rowon=1;withinavalidheatwave=0;rowtocreate=1;curhwlength=0;
+        rowon=1;withinavalidheatwave=0;rowtocreate=1;curhwlength=0;reghwdayscl=zeros(10,2);
         while rowon<=size(reghwdays,1)-2
             if withinavalidheatwave==1
                 if rowon>=2
@@ -815,15 +708,154 @@ if makeheatwaverankingnew==1
             end
         end
         
-        %Manually remove heat waves that do not have >=3 days within the
-        %JJA window (e.g. Aug 30-Sep 1)
-        reghwdayscl(199:211,:)=reghwdayscl(202:214,:);
-        reghwdayscl=reghwdayscl(1:211,:);
+        %Remove heat-wave *days* outside of the JJA window
+        keepgoing=1;
+        while keepgoing==1
+            [a,b]=max(reghwdayscl(:,1));
+            if a>=245 %Sep 2 in leap years, Sep 1 otherwise -- and unacceptable either way
+                oldsize=size(reghwdayscl,1);
+                reghwdayscl(b:oldsize-1,:)=reghwdayscl(b+1:oldsize,:);
+                reghwdayscl=reghwdayscl(1:oldsize-1,:);
+            end
+            if a<245 %got rid of all the dates we needed to
+                keepgoing=0;
+            end
+        end
+        
+        keepgoing=1;
+        while keepgoing==1
+            [a,b]=max(reghwdayscl(:,1));
+            %disp(reghwdayscl);disp(a);disp(b);
+            if a>=244 && rem(reghwdayscl(b,2),4)~=0 %not a leap year so 244 is Sep 1 and is also not OK
+                oldsize=size(reghwdayscl,1);
+                reghwdayscl(b:oldsize-1,:)=reghwdayscl(b+1:oldsize,:);
+                reghwdayscl=reghwdayscl(1:oldsize-1,:);
+            end
+            if a<244 %got rid of all the dates we needed to
+                keepgoing=0;
+            end
+        end
+        
+        disp('line 728');disp(reghwdayscl);
+        %Remove rump heat waves that are no longer at least 3 days long   
+        i=1;hwgoeson=0;hwlength=0;deleterow=0;
+        while i<=size(reghwdayscl,1)-maxhwlength && hwlength<=maxhwlength
+            firstday=reghwdayscl(i,1);
+            secondday=reghwdayscl(i+1,1);
+            if secondday==firstday+1 %hw possible
+                thirdday=reghwdayscl(i+2,1);day3year=reghwdayscl(i+2,2);
+                if thirdday==secondday+1 %hw starts up
+                    fourthday=reghwdayscl(i+3,1);day4year=reghwdayscl(i+3,2);hwlength=3;
+                    if fourthday==thirdday+1 && day4year==day3year %hw goes on
+                        fifthday=reghwdayscl(i+4,1);day5year=reghwdayscl(i+4,2);hwlength=4;
+                        if fifthday==fourthday+1 && day5year==day3year %hw goes on
+                            sixthday=reghwdayscl(i+5,1);day6year=reghwdayscl(i+5,2);hwlength=5;
+                            if sixthday==fifthday+1 && day6year==day3year %hw goes on
+                                seventhday=reghwdayscl(i+6,1);day7year=reghwdayscl(i+6,2);hwlength=6;
+                                if seventhday==sixthday+1 && day7year==day3year %hw goes on
+                                    eighthday=reghwdayscl(i+7,1);day8year=reghwdayscl(i+7,2);hwlength=7;
+                                    if eighthday==seventhday+1 && day8year==day3year %hw goes on
+                                        ninthday=reghwdayscl(i+8,1);day9year=reghwdayscl(i+8,2);hwlength=8;
+                                        if ninthday==eighthday+1 && day9year==day3year %hw goes on
+                                            tenthday=reghwdayscl(i+9,1);day10year=reghwdayscl(i+9,2);hwlength=9;
+                                            if tenthday==ninthday+1 && day10year==day3year %hw goes on
+                                                eleventhday=reghwdayscl(i+10,1);day11year=reghwdayscl(i+10,2);hwlength=10;
+                                                if eleventhday==tenthday+1 && day11year==day3year %hw goes on
+                                                    twelfthday=reghwdayscl(i+11,1);day12year=reghwdayscl(i+11,2);hwlength=11;
+                                                    if twelfthday==eleventhday+1 && day12year==day3year %hw goes on
+                                                        thirteenthday=reghwdayscl(i+12,1);day13year=reghwdayscl(i+12,2);hwlength=12;
+                                                        if thirteenthday==twelfthday+1 && day13year==day3year %hw goes on
+                                                            fourteenthday=reghwdayscl(i+13,1);day14year=reghwdayscl(i+13,2);hwlength=13;
+                                                            if fourteenthday==thirteenthday+1 && day14year==day3year %hw goes on
+                                                                fifteenthday=reghwdayscl(i+14,1);day15year=reghwdayscl(i+14,2);hwlength=14;
+                                                                if fifteenthday==fourteenthday+1 && day15year==day3year %hw goes on
+                                                                    sixteenthday=reghwdayscl(i+15,1);day16year=reghwdayscl(i+15,2);hwlength=15;
+                                                                    if sixteenthday==fifteenthday+1 && day16year==day3year %hw goes on
+                                                                        seventeenthday=reghwdayscl(i+16,1);day17year=reghwdayscl(i+16,2);hwlength=16;
+                                                                        if seventeenthday==sixteenthday+1 && day17year==day3year %hw goes on
+                                                                            eighteenthday=reghwdayscl(i+17,1);day18year=reghwdayscl(i+17,2);hwlength=17;
+                                                                            if eighteenthday==seventeenthday+1 && day18year==day3year %hw goes on
+                                                                            else
+                                                                                deleterow(i:i+16,1)=0;i=i+17;
+                                                                            end
+                                                                        else
+                                                                            deleterow(i:i+15,1)=0;i=i+16;
+                                                                        end
+                                                                    else
+                                                                        deleterow(i:i+14,1)=0;i=i+15;
+                                                                    end
+                                                                else
+                                                                    deleterow(i:i+13,1)=0;i=i+14;
+                                                                end
+                                                            else
+                                                                deleterow(i:i+12,1)=0;i=i+13;
+                                                            end
+                                                        else
+                                                            deleterow(i:i+11,1)=0;i=i+12;
+                                                        end
+                                                    else
+                                                        deleterow(i:i+10,1)=0;i=i+11;
+                                                    end
+                                                else
+                                                    deleterow(i:i+9,1)=0;i=i+10;
+                                                end
+                                            else
+                                                deleterow(i:i+8,1)=0;i=i+9;
+                                            end
+                                        else
+                                            deleterow(i:i+7,1)=0;i=i+8;
+                                        end
+                                    else
+                                        deleterow(i:i+6,1)=0;i=i+7;
+                                    end
+                                else
+                                    deleterow(i:i+5,1)=0;i=i+6;
+                                end
+                            else
+                                deleterow(i:i+4,1)=0;i=i+5;
+                            end
+                        else
+                            deleterow(i:i+3,1)=0;i=i+4;
+                        end
+                    else
+                        deleterow(i:i+2,1)=0;i=i+3;
+                    end
+                    %i=i+1;disp('long heat wave');
+                else
+                    deleterow(i:i+1,1)=1;i=i+2; %delete 2 days
+                end
+            else
+                deleterow(i,1)=1;i=i+1; %delete 1 day
+            end
+            %disp('line 821');disp(i);
+        end
+        %Prepare to delete problem rows
+        daytodelete=zeros(100,1);yeartodelete=zeros(100,1);deletec=1;
+        for i=1:size(reghwdayscl,1)-maxhwlength
+            if deleterow(i)==1
+                daytodelete(deletec,1)=reghwdayscl(i,1);yeartodelete(deletec,1)=reghwdayscl(i,2);
+                deletec=deletec+1;
+            end
+        end
+        %Actually delete them, one by one
+        i=1;deletec=1;
+        while i<=size(reghwdayscl,1)-maxhwlength
+            if reghwdayscl(i,1)==daytodelete(deletec,1) && reghwdayscl(i,2)==yeartodelete(deletec,1)
+                reghwdayscl(i:size(reghwdayscl,1)-1,:)=reghwdayscl(i+1:size(reghwdayscl,1),:);
+                reghwdayscl=reghwdayscl(1:size(reghwdayscl,1)-1,:);
+                deletec=deletec+1;
+                %don't advance i to see if next day that will slide into
+                %i's place must also be deleted
+            else
+                i=i+1;
+            end
+        end
+        disp(reghwdayscl);
         
         %Turn around and use reghwdayscl to create a new improved version of 
         %reghwstarts, as the old one seemed to have some bugs
         rowon=1;withinavalidheatwave=0;rowtocreate2=1;curhwlength=0;reghwstarts=0;
-        while rowon<=size(reghwdayscl,1)
+        while rowon<=size(reghwdayscl,1)-2
             if withinavalidheatwave==1
                 if rowon>=2
                     currowday=reghwdayscl(rowon,1);currowyear=reghwdayscl(rowon,2);
@@ -879,8 +911,7 @@ if makeheatwaverankingnew==1
             end
         end
         
-        %Actually, scratch all that and do it by hand since I need to get
-        %this done expeditiously
+        %Actually, scratch all that and do it by hand
         reghwstarthours=[67033;74329;75121;75385;100609;109897;110905;127801;135385;...
             144217;161569;188089;197041;197161;205945;286249;303121;347089;355129;380713;...
             398929;415921;416089;417313;425929;442537;443041;460321;477385;477985;478465;...
@@ -897,12 +928,9 @@ if makeheatwaverankingnew==1
         %reghwstartendhours(:,2)=reghwendhours;
         %reghwstartendhours(:,3)=monthsofstarts';
         
-        %Unnecessary
-        %reghwstartendhours=sortrows(unique(reghwstartendhours,'rows'),2);
         
         
-        
-        %Similar, older, and more-elegant way of getting much the same information
+        %Similar and more-elegant way of getting much the same information
         %Find rows corresponding to start hours of these heat waves in the NRCC hourly data, for
         %purposes of efficiency
         firstmatchfound=0;
@@ -920,36 +948,62 @@ if makeheatwaverankingnew==1
         end
         row=row-1;
         %Now, use DaysApart function to calculate the other rows
+        %columns are hw starthour|hw DOY|hw year|hw endhour
         %Date 1--what I already have; Date 2--the next one
+        %disp(reghwstarts);
+        hwstarthours=0;
+        if highpct==0.925
+            hwstarthours(1,1)=67009;hwstarthours(1,2)=237;hwstarthours(1,3)=1948;hwstarthours(1,4)=67176;
+        elseif highpct==0.975
+            hwstarthours(1,1)=67033;hwstarthours(1,2)=238;hwstarthours(1,3)=1948;hwstarthours(1,4)=67176;
+        end
         for i=2:size(reghwstarts,1)
-            mon1=DOYtoMonth(reghwstarts(i-1,1),reghwstarts(i-1,2));
-            day1=DOYtoDOM(reghwstarts(i-1,1),reghwstarts(i-1,2));
-            year1=reghwstarts(i-1,2);
-            mon2=DOYtoMonth(reghwstarts(i,1),reghwstarts(i,2));
-            day2=DOYtoDOM(reghwstarts(i,1),reghwstarts(i,2));
-            year2=reghwstarts(i,2);
-            date2=DatetoDOY(mon2,day2,year2);
-            daystojump=DaysApart(mon1,day1,year1,mon2,day2,year2);
+            monstarthw1=DOYtoMonth(reghwstarts(i-1,1),reghwstarts(i-1,2));
+            daystarthw1=DOYtoDOM(reghwstarts(i-1,1),reghwstarts(i-1,2));
+            yearstarthw1=reghwstarts(i-1,2);
+            lengthhw2inhours=reghwstarts(i,3)*24;
+            monhw2=DOYtoMonth(reghwstarts(i,1),reghwstarts(i,2));
+            dayhw2=DOYtoDOM(reghwstarts(i,1),reghwstarts(i,2));
+            yearhw2=reghwstarts(i,2);
+            datehw2=DatetoDOY(monhw2,dayhw2,yearhw2);
+            daystojump=DaysApart(monstarthw1,daystarthw1,yearstarthw1,monhw2,dayhw2,yearhw2);
             row=row+(daystojump)*24;
-            hwstarthours(i,1)=row;hwstarthours(i,2)=date2;hwstarthours(i,3)=year2;
+            hwstarthours(i,1)=row;hwstarthours(i,2)=datehw2;hwstarthours(i,3)=yearhw2;
+            hwstarthours(i,4)=row+lengthhw2inhours-1;
             %disp(row);
+        end
+        
+        %Make alternative versions of reghwbyTstarts and hwbyTstarthours that only consider heat waves <=5 days' duration
+        %(as I've found that short heat waves are more coherent & thus better to study than longer ones)
+        if cutofflength~=0
+            validhwc=0;reghwstartsshortonly=zeros(1,3);hwstarthoursshortonly=zeros(1,4);
+            for i=1:size(reghwstarts,1)
+                if reghwstarts(i,3)<=cutofflength
+                    validhwc=validhwc+1;
+                    reghwstartsshortonly(validhwc,:)=reghwstarts(i,:);
+                    hwstarthoursshortonly(validhwc,:)=hwstarthours(i,:);
+                end
+            end
         end
         
         if variab==1
             reghwdaysbyT=reghwdayscl;reghwbyTstarts=reghwstarts;numreghwsbyT=size(reghwstarts,1);
-            hwbyTstarthours=hwstarthours;
+            hwbyTstarthours=hwstarthours;reghwbyTstartsshortonly=reghwstartsshortonly;
+            hwbyTstarthoursshortonly=hwstarthoursshortonly;
         elseif variab==2
             reghwdaysbyWBT=reghwdayscl;reghwbyWBTstarts=reghwstarts;numreghwsbyWBT=size(reghwstarts,1);
-            hwbyWBTstarthours=hwstarthours;
+            hwbyWBTstarthours=hwstarthours;reghwbyWBTstartsshortonly=reghwstartsshortonly;
+            hwbyWBTstarthoursshortonly=hwstarthoursshortonly;
         end
     end
+    save(strcat(savedvardir,'analyzenycdatahwrankinghp',num2str(highpct*1000),'su',num2str(numstnsthisloop)),'reghwdaysbyT','reghwbyTstarts',...
+        'numreghwsbyT','hwbyTstarthours','reghwbyTstartsshortonly','hwbyTstarthoursshortonly','-append');
 end
 
 
 
-%T- and WBT-based severity scores for *stations* during **homogenized (regional) heat waves**
-%***as defined by temperature*** (can't do it all -- calculating these stats for two
-%separate sets of heat waves would just be introducing too much complexity with little benefit)
+%T- and WBT-based severity scores for stations during **homogenized (regional) heat waves**
+%***as defined by temperature***
 %Calculates heat-wave-severity scores as sums over all the hours of the
 %heat wave, subtracting off the 90th pctile for that hour (in the appropriate month, at the appropriate station)
 %-----Add an option to sum values over an absolute threshold:
@@ -967,10 +1021,10 @@ if calchwseverityscores==1
     scorescompx=zeros(numstns,numreghwsbyT,2);scorescompn=zeros(numstns,numreghwsbyT,2);
     scorescompbstnavg=zeros(numstns,2);
     scorescompxstnavg=zeros(numstns,2);scorescompnstnavg=zeros(numstns,2);
-    scorescompbper=zeros(numstns,numreghwsbyT,2); %scores as per-day avgs for a hw, rather than summed over whole event
-    scorescompxper=zeros(numstns,numreghwsbyT,2);scorescompnper=zeros(numstns,numreghwsbyT,2);
-    scorescompbperhwavg=zeros(numreghwsbyT,2);
-    scorescompxperhwavg=zeros(numreghwsbyT,2);scorescompnperhwavg=zeros(numreghwsbyT,2);
+    scorescompbperm1=zeros(numstns,numreghwsbyT,2); %scores as per-day avgs for a hw, rather than summed over whole event
+    scorescompxperm1=zeros(numstns,numreghwsbyT,2);scorescompnperm1=zeros(numstns,numreghwsbyT,2);
+    scorescompbperhwavgm1=zeros(numreghwsbyT,2);
+    scorescompxperhwavgm1=zeros(numreghwsbyT,2);scorescompnperhwavgm1=zeros(numreghwsbyT,2);
     tsums={};wbtsums={};
     for i=1:numstns
         fprintf('Calculating hw-severity scores for stn %d\n',i);
@@ -1106,9 +1160,9 @@ if calchwseverityscores==1
         scorescompb(i,:,1)=tscore(:,1);scorescompb(i,:,2)=wbtscore(:,1);
         scorescompx(i,:,1)=tscorex(:,1);scorescompx(i,:,2)=wbtscorex(:,1);
         scorescompn(i,:,1)=tscoren(:,1);scorescompn(i,:,2)=wbtscoren(:,1);
-        scorescompbper(i,:,1)=tscoreper(:,1);scorescompbper(i,:,2)=wbtscoreper(:,1);
-        scorescompxper(i,:,1)=tscorexper(:,1);scorescompxper(i,:,2)=wbtscorexper(:,1);
-        scorescompnper(i,:,1)=tscorenper(:,1);scorescompnper(i,:,2)=wbtscorenper(:,1);
+        scorescompbperm1(i,:,1)=tscoreper(:,1);scorescompbperm1(i,:,2)=wbtscoreper(:,1);
+        scorescompxperm1(i,:,1)=tscorexper(:,1);scorescompxperm1(i,:,2)=wbtscorexper(:,1);
+        scorescompnperm1(i,:,1)=tscorenper(:,1);scorescompnperm1(i,:,2)=wbtscorenper(:,1);
     end
     %Heat-wave scores across heat waves consolidated into averages for each station
     %1 for T, 2 for WBT
@@ -1123,12 +1177,12 @@ if calchwseverityscores==1
     %Per-day heat-wave scores across stations consolidated into averages for each heat wave
     %This is done across all NRCC-hourly stations (could do for Big Three as well)
     for i=1:numreghwsbyT
-        scorescompbperhwavg(i,1)=sum(scorescompbper(:,i,1))/(numstns);
-        scorescompxperhwavg(i,1)=sum(scorescompxper(:,i,1))/(numstns);
-        scorescompnperhwavg(i,1)=sum(scorescompnper(:,i,1))/(numstns);
-        scorescompbperhwavg(i,2)=sum(scorescompbper(:,i,2))/(numstns);
-        scorescompxperhwavg(i,2)=sum(scorescompxper(:,i,2))/(numstns);
-        scorescompnperhwavg(i,2)=sum(scorescompnper(:,i,2))/(numstns);
+        scorescompbperhwavgm1(i,1)=sum(scorescompbperm1(:,i,1))/(numstns);
+        scorescompxperhwavgm1(i,1)=sum(scorescompxperm1(:,i,1))/(numstns);
+        scorescompnperhwavgm1(i,1)=sum(scorescompnperm1(:,i,1))/(numstns);
+        scorescompbperhwavgm1(i,2)=sum(scorescompbperm1(:,i,2))/(numstns);
+        scorescompxperhwavgm1(i,2)=sum(scorescompxperm1(:,i,2))/(numstns);
+        scorescompnperhwavgm1(i,2)=sum(scorescompnperm1(:,i,2))/(numstns);
     end
     %Regional heat-wave percentiles from the Big Three stations
     vecplus1t=0;vecplus2t=0; vecplus1wbt=0;vecplus2wbt=0;
@@ -1166,8 +1220,148 @@ if calchwseverityscores==1
     end
 end
 
+
+%Compilation of hourly data at all 11 stations for all short heat waves into one big array
+if compileallhwdata==1
+    
+end
+
+
+%Avg T and WBT for stations during **homogenized (regional) heat waves** as defined by temperature
+%Uses per-full-day averages, calculated as (sum over all the hours of the heat wave)/(24*number of days)
+%Daytime is, as before, 9 AM-8 PM, with nighttime 9 PM-8 AM
+%One thing that aids in efficiency is that all stations have the same # of rows of data
+if calchwavgtwbt==1
+    scorescompbperm2=zeros(numstns,numreghwsbyT,2); %method #2, i.e. to distinguish from method #1 just above
+    scorescompxperm2=zeros(numstns,numreghwsbyT,2);scorescompnperm2=zeros(numstns,numreghwsbyT,2);
+    scorescompbperhwavgm2=zeros(numreghwsbyT,2);
+    scorescompxperhwavgm2=zeros(numreghwsbyT,2);scorescompnperhwavgm2=zeros(numreghwsbyT,2);
+    tsums={};wbtsums={};
+    if numstnsthisloop==3
+        imin=3;imax=5;
+    else
+        imin=1;imax=numstns;
+    end
+    for i=imin:imax
+        fprintf('Calculating hw-severity scores for stn %d\n',i);
+        c=1;tscore=zeros(numreghwsbyT,3);wbtscore=zeros(numreghwsbyT,3);
+        tscoreper=zeros(numreghwsbyT,3);wbtscoreper=zeros(numreghwsbyT,3); %per-day scores, vs hw sums
+        validthrs=zeros(numreghwsbyT,1);validwbthrs=zeros(numreghwsbyT,1);
+        validthrsx=zeros(numreghwsbyT,1);validwbthrsx=zeros(numreghwsbyT,1);
+        validthrsn=zeros(numreghwsbyT,1);validwbthrsn=zeros(numreghwsbyT,1);
+        tscorex=zeros(numreghwsbyT,3);tscoren=zeros(numreghwsbyT,3); %for max/day only, & min/night only respectively
+        tscorexper=zeros(numreghwsbyT,3);tscorenper=zeros(numreghwsbyT,3);
+        wbtscorex=zeros(numreghwsbyT,3);wbtscoren=zeros(numreghwsbyT,3);
+        wbtscorexper=zeros(numreghwsbyT,3);wbtscorenper=zeros(numreghwsbyT,3);
+        validhrsperhw=24*reghwbyTstarts(1:numreghwsbyT,3);
+        row=hwbyTstarthours(1);
+        while row<size(hourlytvecs{i},1) %row counter for all data
+            for hwc=1:numreghwsbyT %heat-wave counter
+                curDOY=DatetoDOY(hourlytvecs{i}(row,3),hourlytvecs{i}(row,2),hourlytvecs{i}(row,4));
+                sumt=0;sumwbt=0;
+                if curDOY==hwbyTstarthours(hwc,2) && hourlytvecs{i}(row,1)==0 &&...
+                        hourlytvecs{i}(row,4)==hwbyTstarthours(hwc,3) %first hour of a regional heat wave
+                    %disp('first hour of a regional heat wave');
+                    curmon=hourlytvecs{i}(row,3);curhour=hourlytvecs{i}(row,1);
+                    %disp(row);disp(i);
+                    for k=1:reghwbyTstarts(hwc,3)*24 %loop through the duration of the heat wave, hour by hour
+                        curhour=hourlytvecs{i}(row+k-1,1);
+                        %1. Sum up temperature
+                        if hourlytvecs{i}(row+k-1,5)>-50
+                            sumt=sumt+hourlytvecs{i}(row+k-1,5);
+                            validthrs(c)=validthrs(c)+1;
+                            if curhour>=9 && curhour<=20 %daytime
+                                tscorex(c,1)=tscorex(c,1)+hourlytvecs{i}(row+k-1,5);
+                                validthrsx(c)=validthrsx(c)+1;
+                                tscore(c,1)=tscore(c,1)+hourlytvecs{i}(row+k-1,5);
+                            else
+                                tscoren(c,1)=tscoren(c,1)+hourlytvecs{i}(row+k-1,5);
+                                validthrsn(c)=validthrsn(c)+1;
+                                tscore(c,1)=tscore(c,1)+hourlytvecs{i}(row+k-1,5);
+                            end
+                        end
+                        %2. Sum up wet-bulb temperature
+                        if hourlytvecs{i}(row+k-1,14)>-50
+                            sumwbt=sumwbt+hourlytvecs{i}(row+k-1,14);
+                            validwbthrs(c)=validwbthrs(c)+1;
+                            if curhour>=9 && curhour<=20 %daytime
+                                wbtscorex(c,1)=wbtscorex(c,1)+hourlytvecs{i}(row+k-1,14);
+                                validwbthrsx(c)=validwbthrsx(c)+1;
+                                wbtscore(c,1)=wbtscore(c,1)+hourlytvecs{i}(row+k-1,14);
+                            else
+                                wbtscoren(c,1)=wbtscoren(c,1)+hourlytvecs{i}(row+k-1,14);
+                                validwbthrsn(c)=validwbthrsn(c)+1;
+                                wbtscore(c,1)=wbtscore(c,1)+hourlytvecs{i}(row+k-1,14);
+                            end
+                        end
+
+                    end
+                    
+                    %Just catalogue the summed T and WBT values (already knowing the heat-wave length)
+                    tsums{i}(c,1)=sumt;wbtsums{i}(c,1)=sumwbt;
+                    tsums{i}(c,2)=reghwbyTstarts(hwc,1);tsums{i}(c,3)=reghwbyTstarts(hwc,2);
+                    tsums{i}(c,4)=reghwbyTstarts(hwc,3);
+                    wbtsums{i}(c,2)=reghwbyTstarts(hwc,1);wbtsums{i}(c,3)=reghwbyTstarts(hwc,2);
+                    wbtsums{i}(c,4)=reghwbyTstarts(hwc,3);
+                    
+                    %For severity scores, normalize to take into account non-valid hours, and
+                    %then divide again to get per-day values
+                    tscore(c,1)=tscore(c,1)*validthrs(c)/validhrsperhw(c);tscoreper(c,1)=tscore(c,1)/(validhrsperhw(c));
+                    wbtscore(c,1)=wbtscore(c,1)*validwbthrs(c)/validhrsperhw(c);wbtscoreper(c,1)=wbtscore(c,1)/(validhrsperhw(c));
+                    tscore(c,2)=reghwbyTstarts(hwc,1);tscoreper(c,2)=tscore(c,2);
+                    wbtscore(c,2)=reghwbyTstarts(hwc,1);wbtscoreper(c,2)=wbtscore(c,2);
+                    tscore(c,3)=reghwbyTstarts(hwc,2);tscoreper(c,3)=tscore(c,3);
+                    wbtscore(c,3)=reghwbyTstarts(hwc,2);wbtscoreper(c,3)=wbtscore(c,3);
+                    tscorex(c,1)=tscorex(c,1)*validthrsx(c)/(validhrsperhw(c)/2);tscorexper(c,1)=tscorex(c,1)/(validhrsperhw(c)/24);
+                    wbtscorex(c,1)=wbtscorex(c,1)*validwbthrsx(c)/(validhrsperhw(c)/2);
+                    wbtscorexper(c,1)=wbtscorex(c,1)/(validhrsperhw(c)/24);
+                    tscorex(c,2)=reghwbyTstarts(hwc,1);tscorexper(c,2)=tscorex(c,2);
+                    wbtscorex(c,2)=reghwbyTstarts(hwc,1);wbtscorexper(c,2)=wbtscorex(c,2);
+                    tscorex(c,3)=reghwbyTstarts(hwc,2);tscorexper(c,3)=tscorex(c,3);
+                    wbtscorex(c,3)=reghwbyTstarts(hwc,2);wbtscorexper(c,3)=wbtscorex(c,3);
+                    tscoren(c,1)=tscoren(c,1)*validthrsn(c)/(validhrsperhw(c)/2);tscorenper(c,1)=tscoren(c,1)/(validhrsperhw(c)/24);
+                    wbtscoren(c,1)=wbtscoren(c,1)*validwbthrsn(c)/(validhrsperhw(c)/2);
+                    wbtscorenper(c,1)=wbtscoren(c,1)/(validhrsperhw(c)/24);
+                    tscoren(c,2)=reghwbyTstarts(hwc,1);tscorenper(c,2)=tscoren(c,2);
+                    wbtscoren(c,2)=reghwbyTstarts(hwc,1);wbtscorenper(c,2)=wbtscoren(c,2);
+                    tscoren(c,3)=reghwbyTstarts(hwc,2);tscorenper(c,3)=tscoren(c,3);
+                    wbtscoren(c,3)=reghwbyTstarts(hwc,2);wbtscorenper(c,3)=wbtscoren(c,3);
+                    c=c+1;if c<=size(hwbyTstarthours,1);row=hwbyTstarthours(c);else row=size(hourlytvecs{i},1);end
+                end
+            end
+        end
+        %Put into chronological order
+        tscore=sortrows(tscore,3);wbtscore=sortrows(wbtscore,3);
+        tscorex=sortrows(tscorex,3);wbtscorex=sortrows(wbtscorex,3);
+        tscoren=sortrows(tscoren,3);wbtscoren=sortrows(wbtscoren,3);
+        tscoreper=sortrows(tscoreper,3);wbtscoreper=sortrows(wbtscoreper,3);
+        tscorexper=sortrows(tscorexper,3);wbtscorexper=sortrows(wbtscorexper,3);
+        tscorenper=sortrows(tscorenper,3);wbtscorenper=sortrows(wbtscorenper,3);
+
+        scorescompb(i,:,1)=tscore(:,1);scorescompb(i,:,2)=wbtscore(:,1);
+        scorescompx(i,:,1)=tscorex(:,1);scorescompx(i,:,2)=wbtscorex(:,1);
+        scorescompn(i,:,1)=tscoren(:,1);scorescompn(i,:,2)=wbtscoren(:,1);
+        scorescompbperm2(i,:,1)=tscoreper(:,1);scorescompbperm2(i,:,2)=wbtscoreper(:,1);
+        scorescompxperm2(i,:,1)=tscorexper(:,1);scorescompxperm2(i,:,2)=wbtscorexper(:,1);
+        scorescompnperm2(i,:,1)=tscorenper(:,1);scorescompnperm2(i,:,2)=wbtscorenper(:,1);
+    end
+    %Per-day heat-wave averages across stations consolidated into averages for each heat wave
+    %This is done across all NRCC-hourly stations (could do for Big Three as well)
+    %Column 1 is T average, column 2 is WBT average
+    for i=1:numreghwsbyT
+        scorescompbperhwavgm2(i,1)=sum(scorescompbperm2(:,i,1))/(numstnsthisloop);
+        scorescompxperhwavgm2(i,1)=sum(scorescompxperm2(:,i,1))/(numstnsthisloop);
+        scorescompnperhwavgm2(i,1)=sum(scorescompnperm2(:,i,1))/(numstnsthisloop);
+        scorescompbperhwavgm2(i,2)=sum(scorescompbperm2(:,i,2))/(numstnsthisloop);
+        scorescompxperhwavgm2(i,2)=sum(scorescompxperm2(:,i,2))/(numstnsthisloop);
+        scorescompnperhwavgm2(i,2)=sum(scorescompnperm2(:,i,2))/(numstnsthisloop);
+    end
+end
+
+
 if makehwseverityscatterplot==1
-    %Create scatterplot of one kind of score vs another for all stns over these recent heat waves
+    %Set up & create scatterplot of one kind of score vs another for all stns over these recent heat waves
+    %This involves splitting heat waves by moisture content analogously to what's done in readnarrdata3hourly
     %Recall that rows of scorescompZ are stations and columns are heatwaves
     if daytimeonly==1
         if perday==1
@@ -1183,18 +1377,18 @@ if makehwseverityscatterplot==1
         end
     else
         if perday==1
-            suffix1=['b'];phr=', Per-Full-Day Average';
+            suffix1=['b'];suffix2='per';phr=', Per-Full-Day Average';
         else
             phr='';
         end
     end
-    sc=eval(['scorescomp' suffix1 suffix2]);sc2=eval(['scorescomp' suffix1 'stnavg']);
-    scper=eval(['scorescomp' suffix1 suffix2]);
+    sc=eval(['scorescomp' suffix1 suffix2 'hwavgm' method]);%sc2=eval(['scorescomp' suffix1 'stnavg' method]);
+    %scper=eval(['scorescomp' suffix1 suffix2 'hwavgm' method]);
     %colors for the different stations
     colorlistshort={colors('red');colors('light red');colors('orange');colors('green');colors('teal');...
         colors('light blue');colors('blue');colors('light purple');colors('pink');colors('brown');colors('grey')};
     %colors for the different heat waves
-    colorlisthws=varycolor(numreghwsbyT/3); %too hard to differentiate so many colors, so need to use symbols also
+    colorlisthws=varycolor(round(numreghwsbyT/3)); %too hard to differentiate so many colors, so need to use symbols also
     markerlisthws={'d';'s';'o'};
     colorlistlong=varycolor(numreghwsbyT);
     grouplist=[2,2,2,2,1,1,2,2,1,2,1]; %inland/coastal stations
@@ -1263,13 +1457,181 @@ if makehwseverityscatterplot==1
                 end
                 hold on;
             end
-        else
-            scatter(sc2(i,score1),sc2(i,score2),'MarkerFaceColor',colorlistshort{i},...
-                            'MarkerEdgeColor',colorlistshort{i},'LineWidth',3);hold on;
-            h(i)=scatter(sc2(i,score1),sc2(i,score2),'MarkerFaceColor',colorlistshort{i},...
-                            'MarkerEdgeColor',colorlistshort{i},'LineWidth',3);        
         end
     end
+    for i=1:numreghwsbyT
+        scatter(sc(i,score1),sc(i,score2),'MarkerFaceColor',colorlistlong(i,:),...
+                        'MarkerEdgeColor',colorlistlong(i,:),'LineWidth',3);hold on;       
+    end
+    p=polyfit(sc(:,score1),sc(:,score2),1);y1=polyval(p,sc(:,score1)); %score 1 is T, score 2 is WBT
+    plot(sc(:,score1),y1,'k','LineWidth',2);
+    
+    %Tercile methodology #1 (see below for methodology #2)
+    %For each point, decide if it is above or below the best-fit line on
+    %the T/WBT scatterplot, as well as its distance from the line
+    %This determines (to first order) whether it is classified as 'very
+    %moist' or 'less moist' and (to second order) where it falls in this
+    %distribution of relative moistness
+    %Slope of best-fit line is p(1), intercept is p(2)
+    m=p(1);b=p(2);
+    for i=1:numreghwsbyT
+        xval=sc(i,score1);yval=sc(i,score2); %xval is hw-avg T, yval is hw-avg WBT
+        mperpline=-1/m;bperpline=yval-mperpline*xval;
+        %Closest pt is at intersection of these two lines
+        xclosestpt=(b-bperpline)/(mperpline-m);
+        yclosestpt=m*xclosestpt+b;
+        %Find distance from this hw point to closest pt on best-fit line
+        disttoline=sqrt((yval-yclosestpt)^2+(xval-xclosestpt)^2);
+        if yval>yclosestpt %hw is above line, so 'very moist'
+            veryvslessmoisthws(i)=1;
+        else %hw is below line, so 'less moist'
+            veryvslessmoisthws(i)=0;disttoline=-disttoline;
+        end
+        hwmoistdistn(i)=disttoline;
+    end
+    %Normalize the moisture distribution
+    hwmoistdistn=hwmoistdistn/std(hwmoistdistn);
+    %Find which heat waves are in the upper and lower tercile based on this moisture distribution
+    uppertercilecutoff=quantile(hwmoistdistn,0.67);
+    lowertercilecutoff=quantile(hwmoistdistn,0.33);
+    uppertercilehwc=1;lowertercilehwc=1;
+    listofverymoisthws=0;listoflessmoisthws=0;
+    for i=1:numreghwsbyT
+        if hwmoistdistn(i)>uppertercilecutoff
+            listofverymoisthws(uppertercilehwc)=i;
+            uppertercilehwc=uppertercilehwc+1;
+        elseif hwmoistdistn(i)<lowertercilecutoff
+            listoflessmoisthws(lowertercilehwc)=i;
+            lowertercilehwc=lowertercilehwc+1;
+        end
+    end
+    %Combine lists for ease of future analysis
+    listofverymoisthws=listofverymoisthws';
+    listoflessmoisthws=listoflessmoisthws';
+    for i=1:numreghwsbyT
+        thishwisverymoist=0;thishwislessmoist=0;
+        for j=1:size(listofverymoisthws,1)
+            if i==listofverymoisthws(j);thishwisverymoist=1;end
+        end
+        for j=1:size(listoflessmoisthws,1)
+            if i==listoflessmoisthws(j);thishwislessmoist=1;end
+        end
+        if thishwisverymoist==1
+            listofhws(i)=3;
+        elseif thishwislessmoist==1
+            listofhws(i)=1;
+        else %middle tercile
+            listofhws(i)=2;
+        end
+    end
+    %Illustration of moisture cutoffs based on this methodology
+    makethis=0;
+    if makethis==1
+        figure(figc);figc=figc+1;
+        plot(hwmoistdistn,'k');hold on;
+        plot(ones(117,1)*uppertercilecutoff,'r');
+        plot(ones(117,1)*lowertercilecutoff,'b');
+        title('Illustration of Moisture Cutoffs for Heat Waves',...
+            'FontName','Arial','FontSize',20,'FontWeight','bold');
+        xlabel('Heat-Wave Count','FontName','Arial','FontSize',16,'FontWeight','bold');
+        ylabel('Normalized Distance Above (Below) Best-Fit WBT-T Relation',...
+            'FontName','Arial','FontSize',16,'FontWeight','bold');
+        text(38,-1.5,'Lower Tercile','FontName','Arial','FontSize',16,'FontWeight','bold');
+        text(95,0.5,'Middle Tercile','FontName','Arial','FontSize',16,'FontWeight','bold');
+        text(40,1.75,'Upper Tercile','FontName','Arial','FontSize',16,'FontWeight','bold');
+        set(gca,'FontName','Arial','FontSize',14,'FontWeight','bold');
+    end
+    
+    %Tercile (or quartile) methodology #2
+    %Simply assign cutoffs based on heat-wave-average value of WBT, no fancy line stuff involved
+    %If changing between tercile & quartile, go through this section & replace one with the other
+    for i=1:numreghwsbyT
+        uppertercilecutoff=quantile(sc(:,2),0.67);
+        lowertercilecutoff=quantile(sc(:,2),0.33);
+        upperquartilecutoff=quantile(sc(:,2),0.75);
+        lowerquartilecutoff=quantile(sc(:,2),0.25);
+    end
+    uppertercilehwc=1;lowertercilehwc=1;upperquartilehwc=1;lowerquartilehwc=1;
+    listofverymoisthws=0;listoflessmoisthws=0;
+    for i=1:numreghwsbyT
+        if sc(i,2)>upperquartilecutoff
+            listofverymoisthws(upperquartilehwc)=i;
+            upperquartilehwc=upperquartilehwc+1;
+        elseif sc(i,2)<lowerquartilecutoff
+            listoflessmoisthws(lowerquartilehwc)=i;
+            lowerquartilehwc=lowerquartilehwc+1;
+        end
+    end
+    %Combine lists for ease of future analysis
+    listofverymoisthws=listofverymoisthws';
+    listoflessmoisthws=listoflessmoisthws';
+    for i=1:numreghwsbyT
+        thishwisverymoist=0;thishwislessmoist=0;
+        for j=1:size(listofverymoisthws,1)
+            if i==listofverymoisthws(j);thishwisverymoist=1;end
+        end
+        for j=1:size(listoflessmoisthws,1)
+            if i==listoflessmoisthws(j);thishwislessmoist=1;end
+        end
+        if thishwisverymoist==1
+            listofhws(i)=3;
+        elseif thishwislessmoist==1
+            listofhws(i)=1;
+        else %middle tercile
+            listofhws(i)=2;
+        end
+    end
+    %Illustration of moisture cutoffs based on this methodology
+    makethis=0;
+    if makethis==1
+        figure(figc);figc=figc+1;
+        plot(sc(:,2),'k');hold on;
+        plot(ones(117,1)*upperquartilecutoff,'r');
+        plot(ones(117,1)*lowerquartilecutoff,'b');
+        title('Illustration of Moisture Cutoffs for Heat Waves',...
+            'FontName','Arial','FontSize',20,'FontWeight','bold');
+        xlabel('Heat-Wave Count','FontName','Arial','FontSize',16,'FontWeight','bold');
+        ylabel('Heat-Wave-Average WBT (C)',...
+            'FontName','Arial','FontSize',16,'FontWeight','bold');
+        text(60,19.75,'Lower Quartile','FontName','Arial','FontSize',16,'FontWeight','bold');
+        text(44,24,'Upper Quartile','FontName','Arial','FontSize',16,'FontWeight','bold');
+        set(gca,'FontName','Arial','FontSize',14,'FontWeight','bold');
+    end
+    
+    %Set things up to save arrays with all heat-wave days broken down by moisture category
+    %The result is analogous to plotdaysshortonly{x,y,z} in readnarrdata3hourly, but with all days not just
+    %first, last, etc.
+    for i=1:2 %i=1 is very moist, i=2 is less moist
+        temp=plotdaysshortonly{1,2,2,i};
+        for j=1:size(reghwbyTstartsshortonly,1)
+            curday=reghwbyTstartsshortonly(j,1);curyear=reghwbyTstartsshortonly(j,2);
+            if curyear>=fpyearnarr && curyear<=lpyear
+                for k=1:size(temp,1)
+                    if temp(k,1)==curday && temp(k,2)==curyear
+                        %add a column to reghwbyTstartsshortonly and hwbyTstarthoursshortonly reflecting this
+                        %newfound info on which moisture category this heat wave belongs to
+                        reghwbyTstartsshortonly(j,4)=i;
+                        hwbyTstarthoursshortonly(j,5)=i;
+                    end
+                end
+            end
+        end
+    end
+    %Add 3's to represent heat waves that are moderately moist
+    for j=1:size(reghwbyTstartsshortonly,1)
+        curyear=reghwbyTstartsshortonly(j,2);
+        if curyear>=fpyearnarr && curyear<=lpyear
+            if reghwbyTstartsshortonly(j,4)==0
+                reghwbyTstartsshortonly(j,4)=3;
+            end
+            if hwbyTstarthoursshortonly(j,5)==0
+                hwbyTstarthoursshortonly(j,5)=3;
+            end
+        end
+    end
+    
+    
+    %Implement group or individual-point plotting options
     if groupbyregion==1
         groups={'Inland';'Coastal'};
         legend(h,groups,'Location','Southeast');
@@ -1285,10 +1647,21 @@ if makehwseverityscatterplot==1
             text(0.87*tempx(2),(0.95-(0.025*j))*tempy(2),phr2);
         end
     end
-    xlabel(sprintf('Heatwave Severity Score based on %s',fourvariabs{score1}),'FontSize',14);
-    ylabel(sprintf('Heatwave Severity Score based on %s',fourvariabs{score2}),'FontSize',14);
-    title(sprintf('%s Severity Scores of %d Regional Heatwaves (1948-2013), for Each of %d Stations%s',...
-        relabs,numreghwsbyT,numstns,phr),'FontSize',16,'FontWeight','bold');
+    if calchwavgtwbt==1
+        xlabel(sprintf('Heat-Wave-Average %s',fourvariabs{score1}),'FontSize',16,'FontName','Arial','FontWeight','bold');
+        ylabel(sprintf('Heat-Wave-Average %s',fourvariabs{score2}),'FontSize',16,'FontName','Arial','FontWeight','bold');
+        title(sprintf('Average T and WBT for %d New-York-City-Area Heat Waves (1948-2014)',...
+            numreghwsbyT),'FontName','Arial','FontSize',20,'FontWeight','bold');
+        set(gca,'FontSize',18);
+    elseif calchwseverityscores==1
+        xlabel(sprintf('Heat-Wave Severity Score based on %s',fourvariabs{score1}),...
+            'FontSize',16,'FontName','Arial','FontWeight','bold');
+        ylabel(sprintf('Heat-Wave Severity Score based on %s',fourvariabs{score2}),...
+            'FontSize',16,'FontName','Arial','FontWeight','bold');
+        title(sprintf('%s Severity Scores of %d New-York-City-Area Heat Waves (1948-2014)',...
+            relabs,numreghwsbyT),'FontName','Arial','FontSize',16,'FontWeight','bold');
+        set(gca,'FontSize',18);
+    end
 end
 
 
@@ -1549,18 +1922,20 @@ if makedaterankchart==1
         figure(figc);clf;figc=figc+1;
         %Averages for all 11 stations for each heat wave
         %Compute scaling factors
-        sf1=100/mean(scorescompbperhwavg(:,1));sf2=100/mean(scorescompbperhwavg(:,2));
-        plot(scorescompbperhwavg(:,1)*sf1,'r','LineWidth',5);hold on;
-        plot(scorescompbperhwavg(:,2)*sf2,'LineWidth',5);
+        scorescompperhwavg=eval(['scorescompbperhwavgm' method]);
+        sf1=100/mean(scorescompperhwavg(:,1));sf2=100/mean(scorescompperhwavg(:,2));
+        plot(scorescompperhwavg(:,1)*sf1,'r','LineWidth',5);hold on;
+        plot(scorescompperhwavg(:,2)*sf2,'LineWidth',5);
         xlim([1 numreghwsbyT]);set(gca,'xticklabel',{[]});
         %Include individual stations' rankings as thinner lines
-        plot(scorescompbper(3,:,1)*sf1,'r--');plot(scorescompbper(4,:,1)*sf1,'rx-');
-        plot(scorescompbper(5,:,1)*sf1,'ro-');
-        plot(scorescompbper(3,:,2)*sf2,'b--');plot(scorescompbper(4,:,2)*sf2,'bx-');
-        plot(scorescompbper(5,:,2)*sf2,'bo-');
+        scorescompper=eval(['scorescompbperm' method]);
+        plot(scorescompper(3,:,1)*sf1,'r--');plot(scorescompper(4,:,1)*sf1,'rx-');
+        plot(scorescompper(5,:,1)*sf1,'ro-');
+        plot(scorescompper(3,:,2)*sf2,'b--');plot(scorescompper(4,:,2)*sf2,'bx-');
+        plot(scorescompper(5,:,2)*sf2,'bo-');
         legend({'Score by T','Score by WBT','JFK','LGA','EWR'},'FontSize',16,'FontName','Arial');
         title('Normalized Regional-Average and Individual-Station Per-Day Heat-Wave Severity Scores for T and for WBT',...
-            'FontSize',16,'FontWeight','bold');
+            'FontName','Arial','FontSize',20,'FontWeight','bold');
         %Make strings of heat-wave dates
         for i=1:numreghwsbyT
             allregmonthdays{i}=strcat(strtrim(DOYtoDate(reghwbyTstarts(i,1),reghwbyTstarts(i,2))),'-',...
@@ -1575,9 +1950,10 @@ if makedaterankchart==1
         %Averages for the Big Three stations for each heat wave
         plot(scorescomptotalhw(:,1),'r','LineWidth',5);hold on; %T prctiles
         plot(scorescomptotalhw(:,2),'LineWidth',5); %WBT prctiles
+        totalmin=min(min(scorescomptotalhw(:,1)),min(scorescomptotalhw(:,2)));
         xlim([1 numreghwsbyT]);set(gca,'xticklabel',{[]});
-        legend({'Score by T','Score by WBT'},'FontSize',16,'FontName','Arial','Location','NorthEastOutside');
-        title('Regional-Average Heat-Wave Percentiles of T and WBT, for T-Defined Heat Waves','FontSize',16,'FontWeight','bold');
+        legend({'T','WBT'},'FontSize',16,'FontName','Arial','Location','NorthEastOutside');
+        title('Regional-Average Heat-Wave Percentiles of T and WBT, for T-Defined Heat Waves','FontSize',18,'FontWeight','bold');
         %Make strings of heat-wave dates
         allregmonthdays={};allregyears={};datestringg={};
         for i=1:numreghwsbyT
@@ -1585,9 +1961,13 @@ if makedaterankchart==1
                 strtrim(DOYtoDate(reghwbyTstarts(i,1)+reghwbyTstarts(i,3)-1,reghwbyTstarts(i,2))));
             allregyears{i}=num2str(reghwbyTstarts(i,2));
             datestringg{i}=strcat(allregmonthdays{i},',   ',allregyears{i});
-            h1=text(i-2.5,78,datestringg{i},'FontSize',8);
-            set(h1,'Rotation',45);
+            %h1=text(i-7,totalmin-((100-totalmin)/5.5),datestringg{i},'FontSize',8);
+            if rem(i,10)==0;h1=text(i-2,totalmin-((100-totalmin)/7.5),num2str(i),'FontSize',12,'FontName','Arial','FontWeight','bold');end
+            %set(h1,'Rotation',45);
         end
+        text(numreghwsbyT/3,totalmin-((100-totalmin)/5.5),'Chronological Heat-Wave Count','FontSize',16,'FontName','Arial','FontWeight','bold');
+        ylabel('Month-Specific Percentile','FontSize',16,'FontName','Arial','FontWeight','bold');
+        set(gca,'FontName','Arial','FontWeight','bold','FontSize',12);
     end
 end
 
@@ -1599,42 +1979,124 @@ end
 %shown in synopnarr figures)
 if clusterheatwaves==1
     %Make chart where rows are first and last days of heat waves, and
-    %columns are hourly T and WBT observations on those days at LGA, EWR, *and* JFK
-    Xmatrix=zeros(numreghwsbyT*2,24*6);
-    for i=1:2:numreghwsbyT*2-1
-        rowfirstday=hwbyTstarthours(round2(i/2,1,'ceil'),1);
-        hwlength=reghwbyTstarts(round2(i/2,1,'ceil'),3);
-        hrsbwfirstlast=(hwlength-1)*24;
-        rowlastday=rowfirstday+hrsbwfirstlast;
-        %all the first-day data
-        Xmatrix(i,1:24)=hourlytvecs{3}(rowfirstday:rowfirstday+23,5);
-        Xmatrix(i,25:48)=hourlytvecs{4}(rowfirstday:rowfirstday+23,5);
-        Xmatrix(i,49:72)=hourlytvecs{5}(rowfirstday:rowfirstday+23,5);
-        Xmatrix(i,73:96)=hourlytvecs{3}(rowfirstday:rowfirstday+23,14);
-        Xmatrix(i,97:120)=hourlytvecs{4}(rowfirstday:rowfirstday+23,14);
-        Xmatrix(i,121:144)=hourlytvecs{5}(rowfirstday:rowfirstday+23,14);
-        %all the last-day data
-        Xmatrix(i+1,1:24)=hourlytvecs{3}(rowlastday:rowlastday+23,5);
-        Xmatrix(i+1,25:48)=hourlytvecs{4}(rowlastday:rowlastday+23,5);
-        Xmatrix(i+1,49:72)=hourlytvecs{5}(rowlastday:rowlastday+23,5);
-        Xmatrix(i+1,73:96)=hourlytvecs{3}(rowlastday:rowlastday+23,14);
-        Xmatrix(i+1,97:120)=hourlytvecs{4}(rowlastday:rowlastday+23,14);
-        Xmatrix(i+1,121:144)=hourlytvecs{5}(rowlastday:rowlastday+23,14);
+    %columns are hourly T and WBT observations on those days at the
+    %target stations
+    if jfklgaewr==1
+        nsh=3; %numstnshere
+        Xmatrix=zeros(numreghwsbyT*2,24*nsh*2);
+        for i=1:2:numreghwsbyT*2-1
+            rowfirstday=hwbyTstarthours(round2(i/2,1,'ceil'),1);
+            hwlength=reghwbyTstarts(round2(i/2,1,'ceil'),3);
+            hrsbwfirstlast=(hwlength-1)*24;
+            rowlastday=rowfirstday+hrsbwfirstlast;
+            %month of each heat wave
+            hwnum=round2(i/2,1,'ceil');
+            hwmonths(hwnum)=DOYtoMonth(reghwbyTstarts(hwnum,1),reghwbyTstarts(hwnum,2));
+            hwmonths=hwmonths';
+            %all the first-day data
+            Xmatrix(i,1:24)=hourlytvecs{3}(rowfirstday:rowfirstday+23,5); %JFK
+            Xmatrix(i,25:48)=hourlytvecs{4}(rowfirstday:rowfirstday+23,5); %LGA
+            Xmatrix(i,49:72)=hourlytvecs{5}(rowfirstday:rowfirstday+23,5); %EWR
+            Xmatrix(i,73:96)=hourlytvecs{3}(rowfirstday:rowfirstday+23,14);
+            Xmatrix(i,97:120)=hourlytvecs{4}(rowfirstday:rowfirstday+23,14);
+            Xmatrix(i,121:144)=hourlytvecs{5}(rowfirstday:rowfirstday+23,14);
+            %all the last-day data
+            Xmatrix(i+1,1:24)=hourlytvecs{3}(rowlastday:rowlastday+23,5);
+            Xmatrix(i+1,25:48)=hourlytvecs{4}(rowlastday:rowlastday+23,5);
+            Xmatrix(i+1,49:72)=hourlytvecs{5}(rowlastday:rowlastday+23,5);
+            Xmatrix(i+1,73:96)=hourlytvecs{3}(rowlastday:rowlastday+23,14);
+            Xmatrix(i+1,97:120)=hourlytvecs{4}(rowlastday:rowlastday+23,14);
+            Xmatrix(i+1,121:144)=hourlytvecs{5}(rowlastday:rowlastday+23,14);
+        end
+    elseif largerregion==1
+        nsh=9; %station numbers 1-9
+        Xmatrix=zeros(numreghwsbyT*2,24*nsh*2);
+        for i=1:2:numreghwsbyT*2-1
+            rowfirstday=hwbyTstarthours(round2(i/2,1,'ceil'),1);
+            hwlength=reghwbyTstarts(round2(i/2,1,'ceil'),3);
+            hrsbwfirstlast=(hwlength-1)*24;
+            rowlastday=rowfirstday+hrsbwfirstlast;
+            %month of each heat wave
+            hwnum=round2(i/2,1,'ceil');
+            hwmonths(hwnum)=DOYtoMonth(reghwbyTstarts(hwnum,1),reghwbyTstarts(hwnum,2));
+            hwmonths=hwmonths';
+            %all the first-day data
+            Xmatrix(i,1:24)=hourlytvecs{1}(rowfirstday:rowfirstday+23,5); %Atl City A
+            Xmatrix(i,25:48)=hourlytvecs{2}(rowfirstday:rowfirstday+23,5); %Bridgeport
+            Xmatrix(i,49:72)=hourlytvecs{3}(rowfirstday:rowfirstday+23,5); %JFK
+            Xmatrix(i,73:96)=hourlytvecs{4}(rowfirstday:rowfirstday+23,5); %LGA
+            Xmatrix(i,97:120)=hourlytvecs{5}(rowfirstday:rowfirstday+23,5); %EWR
+            Xmatrix(i,121:144)=hourlytvecs{6}(rowfirstday:rowfirstday+23,5); %White Plains
+            Xmatrix(i,145:168)=hourlytvecs{7}(rowfirstday:rowfirstday+23,5); %Central Park
+            Xmatrix(i,169:192)=hourlytvecs{8}(rowfirstday:rowfirstday+23,5); %Trenton
+            Xmatrix(i,193:216)=hourlytvecs{9}(rowfirstday:rowfirstday+23,5); %Philly
+            Xmatrix(i,217:240)=hourlytvecs{1}(rowfirstday:rowfirstday+23,14); %Atl City A
+            Xmatrix(i,241:264)=hourlytvecs{2}(rowfirstday:rowfirstday+23,14); %etc
+            Xmatrix(i,265:288)=hourlytvecs{3}(rowfirstday:rowfirstday+23,14);
+            Xmatrix(i,289:312)=hourlytvecs{4}(rowfirstday:rowfirstday+23,14);
+            Xmatrix(i,313:336)=hourlytvecs{5}(rowfirstday:rowfirstday+23,14);
+            Xmatrix(i,337:360)=hourlytvecs{6}(rowfirstday:rowfirstday+23,14);
+            Xmatrix(i,361:384)=hourlytvecs{7}(rowfirstday:rowfirstday+23,14);
+            Xmatrix(i,385:408)=hourlytvecs{8}(rowfirstday:rowfirstday+23,14);
+            Xmatrix(i,409:432)=hourlytvecs{9}(rowfirstday:rowfirstday+23,14);
+            %all the last-day data
+            Xmatrix(i+1,1:24)=hourlytvecs{1}(rowlastday:rowlastday+23,5); %Atl City A
+            Xmatrix(i+1,25:48)=hourlytvecs{2}(rowlastday:rowlastday+23,5); %Bridgeport
+            Xmatrix(i+1,49:72)=hourlytvecs{3}(rowlastday:rowlastday+23,5); %JFK
+            Xmatrix(i+1,73:96)=hourlytvecs{4}(rowlastday:rowlastday+23,5); %LGA
+            Xmatrix(i+1,97:120)=hourlytvecs{5}(rowlastday:rowlastday+23,5); %EWR
+            Xmatrix(i+1,121:144)=hourlytvecs{6}(rowlastday:rowlastday+23,5); %White Plains
+            Xmatrix(i+1,145:168)=hourlytvecs{7}(rowlastday:rowlastday+23,5); %Central Park
+            Xmatrix(i+1,169:192)=hourlytvecs{8}(rowlastday:rowlastday+23,5); %Trenton
+            Xmatrix(i+1,193:216)=hourlytvecs{9}(rowlastday:rowlastday+23,5); %Philly
+            Xmatrix(i+1,217:240)=hourlytvecs{1}(rowlastday:rowlastday+23,14);
+            Xmatrix(i+1,241:264)=hourlytvecs{2}(rowlastday:rowlastday+23,14);
+            Xmatrix(i+1,265:288)=hourlytvecs{3}(rowlastday:rowlastday+23,14);
+            Xmatrix(i+1,289:312)=hourlytvecs{4}(rowlastday:rowlastday+23,14);
+            Xmatrix(i+1,313:336)=hourlytvecs{5}(rowlastday:rowlastday+23,14);
+            Xmatrix(i+1,337:360)=hourlytvecs{6}(rowlastday:rowlastday+23,14);
+            Xmatrix(i+1,361:384)=hourlytvecs{7}(rowlastday:rowlastday+23,14);
+            Xmatrix(i+1,385:408)=hourlytvecs{8}(rowlastday:rowlastday+23,14);
+            Xmatrix(i+1,409:432)=hourlytvecs{9}(rowlastday:rowlastday+23,14);
+        end
     end
-    %Do the clustering on 96 days (first & last days of 48 heat waves),
-    %finding the best k
-    %First days are odd, last days are even
+    %Do the clustering on first & last days of all the heat waves
+    %available, finding the best value of k by trial and error
+    %***kmeans requires complete matrix (no missing values or NaNs)***
+    %First days are odd, last days are even in this matrix
     for numclust=kmin:kmax
         opts=statset('Display','final');
         [idx,c]=kmeans(Xmatrix,numclust,'Replicates',20,'Options',opts);
+            %idx is thus a string of 2*numhws values representing the
+            %cluster membership of all the first and last days separately
     end
+    %dissimmatrix=pdist(Xmatrix);
+    %cutoff=10;
+    %Z=linkage(dissimmatrix,'complete');
+    %newgroups=cluster(Z,'maxclust',numclust);
+    %Experimenting with clustering/correlation procedures that allow for NaNs
+    %More work needs to be done to make this operational however
+    testmatrix=[11 12 1 7 9;3 NaN 9 6 7;1 15 1 15 1];
+    %to compare row 1 & row 2
+    a=isnan(testmatrix(2,:));b=isnan(testmatrix(3,:));
+    goodobsc=1;
+    for i=1:5 %numcols
+        if a(i)==0 && b(i)==0 %no NaNs in this pairing
+            cleanvec1(goodobsc)=testmatrix(2,i);
+            cleanvec2(goodobsc)=testmatrix(3,i);
+            goodobsc=goodobsc+1;
+        end
+    end
+    colin=corrcoef(cleanvec1,cleanvec2);colin=colin(1,2);
+    
+    
     figure(figc);figc=figc+1;
     silhouette(Xmatrix,idx);
     title('Silhouette Plot for Heat-Wave-Day K-Means-Clustering of Hourly T and WBT Values',...
         'FontSize',16,'FontWeight','bold','FontName','Arial');
     xlabel('Silhouette Value (possible range -1 to +1)','FontSize',16,'FontWeight','bold');
     ylabel('Cluster Number','FontSize',16);
-    %Based on the silhouette plots, 6 clusters seems best
+    %Based on the silhouette plots, 6 clusters seems best for jfklgaewr
     
     %What percent of each cluster consists of first and last days? Do
     %certain clusters disproportionately represent first or last days?
@@ -1647,49 +2109,141 @@ if clusterheatwaves==1
         end
     end
     for i=1:numclust
-        clusterdayspct(i,1)=100*clusterdays(i,1)/sum(clusterdays(i,1)+clusterdays(i,2));
-        clusterdayspct(i,2)=100*clusterdays(i,2)/sum(clusterdays(i,1)+clusterdays(i,2));
+        clusterdayspct(i,1)=round(100*clusterdays(i,1)/sum(clusterdays(i,1)+clusterdays(i,2)));
+        clusterdayspct(i,2)=round(100*clusterdays(i,2)/sum(clusterdays(i,1)+clusterdays(i,2)));
     end
-    %Three clusters have strong predilections for either first or last
+    %For jfklgaewr, three clusters have strong predilections for either first or last
     %days, whereas two are pretty evenly split (and one is spurious)
     
-    %Now, calculate and plot average T and WBT traces for each cluster to visualize what
-    %'kind' of days these are at the Big Three stations
-    avgjfkt=zeros(numclust,24);avglgat=zeros(numclust,24);avgewrt=zeros(numclust,24);
-    avgjfkwbt=zeros(numclust,24);avglgawbt=zeros(numclust,24);avgewrwbt=zeros(numclust,24);
-    daycbyclust=zeros(numclust,1);
-    for clust=1:numclust
-        for i=1:size(idx,1)
-            if idx(i)==clust
-                daycbyclust(clust)=daycbyclust(clust)+1;
-                avgjfkt(clust,:)=avgjfkt(clust,:)+Xmatrix(i,1:24);
-                avglgat(clust,:)=avglgat(clust,:)+Xmatrix(i,25:48);
-                avgewrt(clust,:)=avgewrt(clust,:)+Xmatrix(i,49:72);
-                avgjfkwbt(clust,:)=avgjfkwbt(clust,:)+Xmatrix(i,73:96);
-                avglgawbt(clust,:)=avglgawbt(clust,:)+Xmatrix(i,97:120);
-                avgewrwbt(clust,:)=avgewrwbt(clust,:)+Xmatrix(i,121:144);
-            end
+    %How does cluster membership compare among Jun, Jul, and Aug?
+    junc=1;julc=1;augc=1;
+    cl1c=1;cl2c=1;cl3c=1;cl4c=1;cl5c=1;cl6c=1;
+    for i=1:size(idx,1)
+        hwnum=round2(i/2,1,'ceil');
+        assocmon=hwmonths(hwnum);
+        if assocmon==6 %this is a Jun hw
+            clustermembbymon{assocmon-5}(junc)=idx(i);
+            junc=junc+1;
+        elseif assocmon==7 %this is a Jul hw
+            clustermembbymon{assocmon-5}(julc)=idx(i);
+            julc=julc+1;
+        elseif assocmon==8 %this is an Aug hw
+            clustermembbymon{assocmon-5}(augc)=idx(i);
+            augc=augc+1;
         end
-        avgjfkt(clust,:)=avgjfkt(clust,:)/daycbyclust(clust);
-        avglgat(clust,:)=avglgat(clust,:)/daycbyclust(clust);
-        avgewrt(clust,:)=avgewrt(clust,:)/daycbyclust(clust);
-        avgjfkwbt(clust,:)=avgjfkwbt(clust,:)/daycbyclust(clust);
-        avglgawbt(clust,:)=avglgawbt(clust,:)/daycbyclust(clust);
-        avgewrwbt(clust,:)=avgewrwbt(clust,:)/daycbyclust(clust);
-        
-        figure(figc);figc=figc+1;
-        plot(avgjfkt(clust,:));hold on;plot(avglgat(clust,:),'k');plot(avgewrt(clust,:),'r');
-        plot(avgjfkwbt(clust,:),'o');plot(avglgawbt(clust,:),'ko');plot(avgewrwbt(clust,:),'ro');
-        ylim([14 39]);
-        title(sprintf('Average Traces of T and WBT at JFK, LGA, and EWR for Cluster %d, Which Is %0.0f Percent Last Days',...
-            clust,clusterdayspct(clust,2)),'FontSize',16,'FontWeight','bold','FontName','Arial');
-        xlabel('Hour of the Day','FontSize',16,'FontWeight','bold');
-        ylabel('Deg C','FontSize',16,'FontWeight','bold');
+        if idx(i)==1;cl1c=cl1c+1;elseif idx(i)==2;cl2c=cl2c+1;elseif idx(i)==3;cl3c=cl3c+1;
+            elseif idx(i)==4;cl4c=cl4c+1;elseif idx(i)==5;cl5c=cl5c+1;elseif idx(i)==6;cl6c=cl6c+1;end
+    end
+    %Sum up for each month
+    monthclusttotals=zeros(3,kiw); %3 rows are months, kiw columns are clusters
+    scl1h=0;scl2h=0;scl3h=0;scl4h=0;scl5h=0;scl6h=0;
+    for i=1:junc-1;if clustermembbymon{1}(i)==1;scl1h=scl1h+1;elseif clustermembbymon{1}(i)==2;scl2h=scl2h+1;
+            elseif clustermembbymon{1}(i)==3;scl3h=scl3h+1;elseif clustermembbymon{1}(i)==4;scl4h=scl4h+1;
+                elseif clustermembbymon{1}(i)==5;scl5h=scl5h+1;elseif clustermembbymon{1}(i)==6;scl6h=scl6h+1;end;end
+    monthclusttotals(1,:)=[scl1h scl2h scl3h scl4h scl5h scl6h];
+    scl1h=0;scl2h=0;scl3h=0;scl4h=0;scl5h=0;scl6h=0;
+    for i=1:julc-1;if clustermembbymon{2}(i)==1;scl1h=scl1h+1;elseif clustermembbymon{2}(i)==2;scl2h=scl2h+1;
+            elseif clustermembbymon{2}(i)==3;scl3h=scl3h+1;elseif clustermembbymon{2}(i)==4;scl4h=scl4h+1;
+                elseif clustermembbymon{2}(i)==5;scl5h=scl5h+1;elseif clustermembbymon{2}(i)==6;scl6h=scl6h+1;end;end
+    monthclusttotals(2,:)=[scl1h scl2h scl3h scl4h scl5h scl6h];
+    scl1h=0;scl2h=0;scl3h=0;scl4h=0;scl5h=0;scl6h=0;
+    for i=1:augc-1;if clustermembbymon{3}(i)==1;scl1h=scl1h+1;elseif clustermembbymon{3}(i)==2;scl2h=scl2h+1;
+            elseif clustermembbymon{3}(i)==3;scl3h=scl3h+1;elseif clustermembbymon{3}(i)==4;scl4h=scl4h+1;
+                elseif clustermembbymon{3}(i)==5;scl5h=scl5h+1;elseif clustermembbymon{3}(i)==6;scl6h=scl6h+1;end;end
+    monthclusttotals(3,:)=[scl1h scl2h scl3h scl4h scl5h scl6h];
+    
+    %For each month, what % of its days belong to different clusters?
+    for row=1:3
+        rowsum=sum(monthclusttotals(row,:));
+        for col=1:kiw
+            monthclustpctsbymon(row,col)=round(100*monthclusttotals(row,col)/rowsum);
+        end
+    end
+    %For each cluster, what % of its days belong to different months?
+    for col=1:kiw
+        for row=1:3
+            monthclustpctsbycl(row,col)=round(100*monthclusttotals(row,col)/eval(['cl' num2str(col) 'c-1']));
+        end
+    end
+    
+    
+    %Now, calculate and plot average T and WBT traces for each cluster to visualize what 'kind' of days these are
+    %1. at the Big Three stations
+    if jfklgaewr==1
+        avgjfkt=zeros(numclust,24);avglgat=zeros(numclust,24);avgewrt=zeros(numclust,24);
+        avgjfkwbt=zeros(numclust,24);avglgawbt=zeros(numclust,24);avgewrwbt=zeros(numclust,24);
+        daycbyclust=zeros(numclust,1);
+        for clust=1:numclust
+            for i=1:size(idx,1)
+                if idx(i)==clust
+                    daycbyclust(clust)=daycbyclust(clust)+1;
+                    avgjfkt(clust,:)=avgjfkt(clust,:)+Xmatrix(i,1:24);
+                    avglgat(clust,:)=avglgat(clust,:)+Xmatrix(i,25:48);
+                    avgewrt(clust,:)=avgewrt(clust,:)+Xmatrix(i,49:72);
+                    avgjfkwbt(clust,:)=avgjfkwbt(clust,:)+Xmatrix(i,73:96);
+                    avglgawbt(clust,:)=avglgawbt(clust,:)+Xmatrix(i,97:120);
+                    avgewrwbt(clust,:)=avgewrwbt(clust,:)+Xmatrix(i,121:144);
+                end
+            end
+            avgjfkt(clust,:)=avgjfkt(clust,:)/daycbyclust(clust);
+            avglgat(clust,:)=avglgat(clust,:)/daycbyclust(clust);
+            avgewrt(clust,:)=avgewrt(clust,:)/daycbyclust(clust);
+            avgjfkwbt(clust,:)=avgjfkwbt(clust,:)/daycbyclust(clust);
+            avglgawbt(clust,:)=avglgawbt(clust,:)/daycbyclust(clust);
+            avgewrwbt(clust,:)=avgewrwbt(clust,:)/daycbyclust(clust);
+
+            figure(figc);figc=figc+1;
+            plot(avgjfkt(clust,:));hold on;plot(avglgat(clust,:),'k');plot(avgewrt(clust,:),'r');
+            plot(avgjfkwbt(clust,:),'o');plot(avglgawbt(clust,:),'ko');plot(avgewrwbt(clust,:),'ro');
+            ylim([14 39]);
+            %title(sprintf('Average Traces of T and WBT at JFK, LGA, and EWR for Cluster %d, Which Is %0.0f Percent Last Days',...
+            %    clust,clusterdayspct(clust,2)),'FontSize',16,'FontWeight','bold','FontName','Arial');
+            title(sprintf('Average Traces of T and WBT at JFK, LGA, and EWR for Cluster %d',...
+                clust),'FontSize',16,'FontWeight','bold','FontName','Arial');
+            xlabel('Hour of the Day','FontSize',16,'FontWeight','bold');
+            ylabel('Deg C','FontSize',16,'FontWeight','bold');
+        end
+    %2. More broadly in the region
+    elseif largerregion==1
+        for i=1:9;eval(['avg' cell2mat(prhcodes(i)) 't=zeros(numclust,24);']);end
+        for i=1:9;eval(['avg' cell2mat(prhcodes(i)) 'wbt=zeros(numclust,24);']);end
+        daycbyclust=zeros(numclust,1);
+        for clust=1:numclust
+            for i=1:size(idx,1)
+                if idx(i)==clust
+                    daycbyclust(clust)=daycbyclust(clust)+1;
+                    j=0;
+                    for j=1:9
+                        hourtostartt=(j-1)*24+1;hourtoendt=j*24;
+                        eval(['avg' cell2mat(prhcodes(j)) 't(clust,:)=avg' cell2mat(prhcodes(j))...
+                            't(clust,:)+Xmatrix(j,' num2str(hourtostartt) ':' num2str(hourtoendt) ');']);
+                        hourtostartwbt=(j-1)*24+1+nsh*24;hourtoendwbt=j*24+nsh*24;
+                        eval(['avg' cell2mat(prhcodes(j)) 'wbt(clust,:)=avg' cell2mat(prhcodes(j))...
+                            'wbt(clust,:)+Xmatrix(j,' num2str(hourtostartwbt) ':' num2str(hourtoendwbt) ');']);
+                    end
+                end
+            end
+            for j=1:9
+                eval(['avg' cell2mat(prhcodes(j)) 't(clust,:)=avg' cell2mat(prhcodes(j)) 't(clust,:)/daycbyclust(clust);']);
+                eval(['avg' cell2mat(prhcodes(j)) 'wbt(clust,:)=avg' cell2mat(prhcodes(j)) 'wbt(clust,:)/daycbyclust(clust);']);
+            end
+
+            figure(figc);figc=figc+1;
+            plot(avgacyt(clust,:));hold on;plot(avgbdrt(clust,:),'b');plot(avgjfkt(clust,:));plot(avglgat(clust,:),'k');...
+                plot(avgewrt(clust,:),'r');plot(avghpnt(clust,:),'r');plot(avgnyct(clust,:),'r');plot(avgphlt(clust,:),'r');
+            plot(avgacywbt(clust,:),'ko');hold on;plot(avgbdrwbt(clust,:),'ko');plot(avgjfkwbt(clust,:),'ko');plot(avglgawbt(clust,:),'ko');...
+                plot(avgewrwbt(clust,:),'ro');plot(avghpnwbt(clust,:),'ro');plot(avgnycwbt(clust,:),'ro');plot(avgphlwbt(clust,:),'ro');
+            ylim([14 39]);
+            title(sprintf('Average Traces of T and WBT at 9 NYC-Area Stations for Cluster %d, Which Is %0.0f Percent Last Days',...
+                clust,clusterdayspct(clust,2)),'FontName','Arial','FontSize',16,'FontWeight','bold','FontName','Arial');
+            xlabel('Hour of the Day','FontName','Arial','FontSize',16,'FontWeight','bold');
+            ylabel('Deg C','FontName','Arial','FontSize',16,'FontWeight','bold');
+        end
     end
 end
     
     
-%Plot NARR data separately on each cluster's days to compare amongst them (1979-2014 data only at this point)
+%Plot NARR data separately on each cluster's days to compare amongst them
 if narrdataforclusters==1
     total={};
     for clusternumber=1:6
@@ -1712,8 +2266,7 @@ if narrdataforclusters==1
                         curmonstart=eval(['m' num2str(month) 's' char(suffix)]);
                         curmonlen=eval(['m' num2str(month+1) 's' char(suffix)])-eval(['m' num2str(month) 's' char(suffix)]);
                         %Search through listing of days belonging to each cluster to see
-                        %if this month contains one of them, and if so, get the
-                        %NARR array corresponding to it
+                        %if this month contains one of them, and, if so, get the daily array corresponding to it
                         for row=1:size(reghwbyTstarts,1)*2
                             adjrow=round2(row/2,1,'ceil');
                             if rem(row,2)==0
@@ -1768,10 +2321,9 @@ if narrdataforclusters==1
             end
             total{clusternumber,desvar(variab)}=totaltemp/hwdaysfound;
         end
-        %Make plots of these cluster-specific fields just found
-        %Standard thing is to plot anomalies since absolute fields all look
-        %kind of similar
         
+        %Make plots of these cluster-specific fields just found
+        %Standard thing is to plot anomalies since absolute fields all look kind of similar
         cantgraph=0;havewinddata=0;
         for i=1:size(desvar,1)
             if isnan(max(max(total{clusternumber,desvar(i)})));cantgraph=1;end
@@ -2085,4 +2637,243 @@ if displaystnpctiles==1
         set(gca,'XTick',xData);
     end
 end
+
+%Plot number of heat waves per decade to get a sense of trends (if any)
+if plotheatwavesperdecade==1
+    reghwstartstouse=eval(['reghwbyTstartshp' num2str(hphere*1000) 'su3']);
+    c1950s=0;c1960s=0;c1970s=0;c1980s=0;c1990s=0;c2000s=0;c2010s=0;
+    for i=1:size(reghwstartstouse,1)
+        if reghwstartstouse(i,2)>=1950 && reghwstartstouse(i,2)<=1959
+            c1950s=c1950s+1;
+        elseif reghwstartstouse(i,2)>=1960 && reghwstartstouse(i,2)<=1969
+            c1960s=c1960s+1;
+        elseif reghwstartstouse(i,2)>=1970 && reghwstartstouse(i,2)<=1979
+            c1970s=c1970s+1;
+        elseif reghwstartstouse(i,2)>=1980 && reghwstartstouse(i,2)<=1989
+            c1980s=c1980s+1;
+        elseif reghwstartstouse(i,2)>=1990 && reghwstartstouse(i,2)<=1999
+            c1990s=c1990s+1;
+        elseif reghwstartstouse(i,2)>=2000 && reghwstartstouse(i,2)<=2009
+            c2000s=c2000s+1;
+        elseif reghwstartstouse(i,2)>=2010 && reghwstartstouse(i,2)<=2014
+            c2010s=c2010s+1;
+        end
+    end
+    c2010s=c2010s*2;
+    hwsperdecade=[c1950s;c1960s;c1970s;c1980s;c1990s;c2000s;c2010s];
+    xlabels={'1950-59';'1960-69';'1970-79';'1980-89';'1990-99';'2000-09';'2010-14 (x2)'};
+    xlabels2=[1955;1965;1975;1985;1995;2005;2015];
+    figure(figc);clf;figc=figc+1;
+    plot(xlabels2,hwsperdecade,'LineWidth',2);ylim([0 35]);
+    xlabel('Decade','FontName','Arial','FontSize',16,'FontWeight','bold');
+    ylabel('Number of NYC-Area Heat Waves','FontName','Arial','FontSize',16,'FontWeight','bold');
+    set(gca,'FontSize',18);
+    title('Number Of NYC-Area Heat Waves Per Decade','FontName','Arial','FontSize',16,'FontWeight','bold');
+end
+
+
+%Plot various characteristics of the observed station data, both for all and selected hw days
+%The goal of this is mostly to verify against NARR composites of the same sets of days
+if computeplotnycdataduringhws==1
+    if computationpart==1
+        tempvec={};wbtvec={};windazvec={};windmagvec={};
+        tempvecavg={};wbtvecavg={};windazvecavg={};windmagvecavg={};
+        hwlengths=0;arrayforboxplot=0;
+        for j=3:5
+            catcounts{j}=zeros(8,1);catcountsfdo{j}=zeros(8,1);catcountsldo{j}=zeros(8,1);
+            catcountsvmo{j}=zeros(8,1);catcountslmo{j}=zeros(8,1);
+            catfreqsaved{j}=zeros(8,1);catfreqsavedvmo{j}=zeros(8,1);catfreqsavedlmo{j}=zeros(8,1);
+            windazvec1000randomjja{j}=0;catfreqsavedalljja{j}=zeros(1,8);
+        end
+        for stn=3:5 %JFK,LGA,EWR only
+            %windazvec{stn}=zeros(size(hwbyTstarthoursshortonly,1),120,8); %up to 120 hours in a 5-day heat wave
+            for i=1:size(hwbyTstarthoursshortonly,1) %i is heat-wave count
+                hour=1;
+                hwlengths(i)=hwbyTstarthoursshortonly(i,4)-hwbyTstarthoursshortonly(i,1)+1; 
+                for hourwithinhw=hwbyTstarthoursshortonly(i,1):hwbyTstarthoursshortonly(i,4) 
+                        %i.e. counting over 72 hours if a 3-day heat wave, 96 if a 4-day, etc
+                    tempvec{stn}(i,hour)=hourlytvecs{stn}(hourwithinhw,5);
+                    wbtvec{stn}(i,hour)=hourlytvecs{stn}(hourwithinhw,14);
+                    wndazhere=hourlytvecs{stn}(hourwithinhw,7);%if wndazhere==0;wndazhere=360;end
+                    azcat=round2(wndazhere/45,1,'ceil');
+                    if azcat>0;windazvec{stn}(i,hour)=azcat;end
+                    wndmaghere=hourlytvecs{stn}(hourwithinhw,8);
+                    if wndmaghere>0;windmagvec{stn}(i,hour)=wndmaghere;end
+                    hour=hour+1;
+                end
+            end
+
+            %1000 randomly selected 4-day periods in JJA
+            valid4dayc=0;tryc=0;
+            temp=hourlytvecs{stn};
+            while valid4dayc<=1000
+                potentiallinetostartat=randi(size(temp,1),1,1);
+                monthofthisline=hourlytvecs{stn}(potentiallinetostartat,3);
+                hourofthisline=hourlytvecs{stn}(potentiallinetostartat,1);
+                if monthofthisline==6 || monthofthisline==7 || monthofthisline==8 %within JJA
+                    j=0;
+                    while j<=23
+                        testhour=hourlytvecs{stn}(potentiallinetostartat-j,1);
+                        if testhour==0 %this offset is the one we were looking for
+                            actuallinetostartat=potentiallinetostartat-j;
+                            j=24;
+                        else
+                            j=j+1;
+                        end
+                    end
+                    azimuthvec=hourlytvecs{stn}(actuallinetostartat:actuallinetostartat+95,7);
+                    if min(azimuthvec)>-50 %no missing data, so everything's good to go
+                        %fprintf('Good to go with a starting hour of %d\n',actuallinetostartat);
+                        azcategs=round2(azimuthvec/45,1,'ceil');
+                        for azcat=1:8
+                            catfreqhere=countnumberofoccurrences(azcat,azcategs)/size(azcategs,2);
+                            windazvec1000randomjja{stn}(valid4dayc+1,azcat)=catfreqhere;
+                        end
+                        valid4dayc=valid4dayc+1;
+                    end
+                end
+                tryc=tryc+1;
+            end
+
+            %Compute station averages for each hw hour, excluding zeros 
+            %(which are most often because the hw was short, sometimes because conditions were just calm)
+            for hour=1:120
+                A=tempvec{stn}(:,hour);tempvecavg{stn}(hour)=mean(A(A~=0));
+                B=wbtvec{stn}(:,hour);wbtvecavg{stn}(hour)=mean(B(B~=0));
+                C=windazvec{stn}(:,hour);windazvecavg{stn}(hour)=(mean(C(C~=0))-0.5)*45; %conversion back from category to deg
+                D=windmagvec{stn}(:,hour);windmagvecavg{stn}(hour)=mean(D(D~=0));
+            end
+
+            %Get ready to make bar chart comparing wind azimuths at JFK, LGA, EWR for all short heat waves, 
+            %and then separately for first & last days of them, and for less-moist & very moist ones
+            %Also compare to 1000 randomly selected 4-day periods within JJA
+            vmc=0;lmc=0;
+            for i=1:size(hwbyTstarthoursshortonly,1) %i is heat-wave count
+                C=windazvec{stn}(i,1:hwlengths(i)); %all days of (short) heat waves
+                Cfdo=windazvec{stn}(i,1:24); %first days only
+                Cldo=windazvec{stn}(i,hwlengths(i)-23:hwlengths(i)); %last days only
+                for azcat=1:8
+                    catcounts{stn}(azcat)=catcounts{stn}(azcat)+countnumberofoccurrences(azcat,C);
+                    catfreqsaved{stn}(i,azcat)=countnumberofoccurrences(azcat,C)/size(C,2);
+                    catcountsfdo{stn}(azcat)=catcountsfdo{stn}(azcat)+countnumberofoccurrences(azcat,Cfdo);
+                    catcountsldo{stn}(azcat)=catcountsldo{stn}(azcat)+countnumberofoccurrences(azcat,Cldo);
+                    if hwbyTstarthoursshortonly(i,5)==1 %very moist heat wave
+                        if azcat==1;vmc=vmc+1;end
+                        catcountsvmo{stn}(azcat)=catcountsvmo{stn}(azcat)+countnumberofoccurrences(azcat,C);
+                        catfreqsavedvmo{stn}(vmc,azcat)=countnumberofoccurrences(azcat,C)/size(C,2);
+                    elseif hwbyTstarthoursshortonly(i,5)==2 %less-moist heat wave
+                        if azcat==1;lmc=lmc+1;end
+                        catcountslmo{stn}(azcat)=catcountslmo{stn}(azcat)+countnumberofoccurrences(azcat,C);
+                        catfreqsavedlmo{stn}(lmc,azcat)=countnumberofoccurrences(azcat,C)/size(C,2);
+                    end
+                end
+            end
+            %Same for randomly selected 4-day JJA periods
+            for i=1:size(windazvec1000randomjja{stn},1)
+                catfreqsavedalljja{stn}(i,:)=windazvec1000randomjja{stn}(i,:)./sum(windazvec1000randomjja{stn}(i,:));
+            end
+        end
+            
+        %Further prepare for southern-component azimuth box plot by organizing arrays by station & vm/lm category
+        arrayforboxplot1{3,1}=catfreqsavedvmo{3}(:,4)+catfreqsavedvmo{3}(:,5); %SSE+SSW at JFK, very moist heat waves
+        arrayforboxplot1{3,2}=catfreqsavedlmo{3}(:,4)+catfreqsavedlmo{3}(:,5); %SSE+SSW at JFK, less-moist heat waves
+        arrayforboxplot1{4,1}=catfreqsavedvmo{4}(:,4)+catfreqsavedvmo{4}(:,5); %SSE+SSW at LGA, very moist heat waves
+        arrayforboxplot1{4,2}=catfreqsavedlmo{4}(:,4)+catfreqsavedlmo{4}(:,5); %SSE+SSW at LGA, less-moist heat waves
+        arrayforboxplot1{5,1}=catfreqsavedvmo{5}(:,4)+catfreqsavedvmo{5}(:,5); %SSE+SSW at EWR, very moist heat waves
+        arrayforboxplot1{5,2}=catfreqsavedlmo{5}(:,4)+catfreqsavedlmo{5}(:,5); %SSE+SSW at EWR, less-moist heat waves
+        arrayforboxplot2{3,1}=catfreqsavedalljja{3}(:,4)+catfreqsavedalljja{3}(:,5); %SSE+SSW at JFK, 1000 4-day JJA periods
+        arrayforboxplot2{4,1}=catfreqsavedalljja{4}(:,4)+catfreqsavedalljja{4}(:,5); %SSE+SSW at LGA, 1000 4-day JJA periods
+        arrayforboxplot2{5,1}=catfreqsavedalljja{5}(:,4)+catfreqsavedalljja{5}(:,5); %SSE+SSW at EWR, 1000 4-day JJA periods
+        holdingarray=[arrayforboxplot1{3,1}' arrayforboxplot1{3,2}' arrayforboxplot1{4,1}'...
+            arrayforboxplot1{4,2}' arrayforboxplot1{5,1}' arrayforboxplot1{5,2}' ...
+            arrayforboxplot2{3,1}' arrayforboxplot2{3,2}' arrayforboxplot2{3,3}'];
+        grp=[zeros(1,size(arrayforboxplot1{3,1},1)),ones(1,size(arrayforboxplot1{3,2},1)),2*ones(1,size(arrayforboxplot1{4,1},1)),...
+            3*ones(1,size(arrayforboxplot1{4,2},1)),4*ones(1,size(arrayforboxplot1{5,1},1)),5*ones(1,size(arrayforboxplot1{5,2},1)),...
+            6*ones(1,size(arrayforboxplot2{3,1},1)),7*ones(1,size(arrayforboxplot2{4,1},1)),8*ones(1,size(arrayforboxplot2{5,1},1))];
+    end
+    
+    
+    if plotpart==1
+        %Plot temporal evolution of average conditions at three stations over the course of short heat waves
+        dataarray={'temp';'wbt';'windaz';'windmag'};
+        titlearray={'Temperatures';'Wet-Bulb Temperatures';'Wind Azimuths';'Wind Magnitudes'};
+        ylabelarray={'Temperature (C)';'WBT (C)';'Azimuth (deg)';'Magnitude (m/s)'};
+        for i=1:4
+            figure(figc);clf;figc=figc+1;
+            plot(eval([dataarray{i} 'vecavg{3}']),'LineWidth',2);hold on;
+            plot(eval([dataarray{i} 'vecavg{4}']),'r','LineWidth',2);
+            plot(eval([dataarray{i} 'vecavg{5}']),'k','LineWidth',2);
+            legend('JFK','LGA','EWR');
+            xlabel('Hour of Heat Wave','FontSize',14,'FontWeight','bold','FontName','Arial');
+            ylabel(ylabelarray{i},'FontSize',14,'FontWeight','bold','FontName','Arial');
+            title(sprintf('Average %s During Heat Waves at Three NYC-Area Stations',titlearray{i}),...
+            'FontSize',18,'FontWeight','bold','FontName','Arial');
+            set(gca,'FontSize',14,'FontWeight','bold','FontName','Arial');
+        end
+        
+        %Make bar chart comparing wind azimuths at JFK, LGA, EWR for all short heat waves, 
+            %and then separately for less-moist and very moist ones
+        suffixes={'';'fdo';'ldo';'vmo';'lmo'};
+        titleaddenda={'';', First Days Only';', Last Days Only';', Very Moist Heat Waves';', Less-Moist Heat Waves'};
+        for i=1:size(suffixes,1)
+            suffixhere=suffixes{i};
+            catcountshere=eval(['catcounts' suffixhere ';']);
+            figure(figc);clf;figc=figc+1;
+            for stn=3:5;catcountshere{stn}=catcountshere{stn}/sum(catcountshere{stn});end %normalize counts
+            eval(['catcounts' suffixhere '=catcountshere;']);
+            plotmatrix=[catcountshere{3} catcountshere{4} catcountshere{5}]'; %now the stations are rows & the azimuth categories are columns
+            bar(plotmatrix,'stacked');
+            ylim([0 1]);
+            legend('NNE','ENE','ESE','SSE','SSW','WSW','WNW','NNW','Location','NorthEastOutside');
+            ylabel('Fraction of Hours','FontSize',18,'FontWeight','bold','FontName','Arial');
+            set(gca,'xticklabel',{'JFK';'LGA';'EWR'});
+            title(sprintf('Average Wind Azimuths During Heat Waves at Three NYC-Area Stations%s',titleaddenda{i}),...
+                'FontSize',20,'FontWeight','bold','FontName','Arial');
+            set(gca,'FontSize',18,'FontWeight','bold','FontName','Arial');
+        end
+        
+        %Make box plot comparing frequency of southerly-component (SSE and SSW) winds at JFK, LGA, and EWR
+        %for very moist vs less-moist heat waves vs 1000 random 4-day JJA periods
+        figure(figc);clf;figc=figc+1;
+        boxplot(holdingarray,grp,'Labels',{'JFK, Very Moist','JFK, Less Moist','JFK, Random JJA',...
+            'LGA, Very Moist','LGA, Less Moist','LGA, Random JJA',...
+            'EWR, Very Moist','EWR, Less Moist','EWR, Random JJA'});
+        set(gca,'FontSize',16,'FontWeight','bold','FontName','Arial');
+        set(findobj(gca,'Type','text'),'FontSize',16,'FontWeight','bold','FontName','Arial');
+    end
+end
+
+%K-means analysis
+if dokmeansstnwbt==1
+    %First, calculate the daily maxes of WBT for the central day of each heat wave for each of the 21 stations in readnortheastdata
+    %This yields a 21x37 matrix (X)
+    %Then, clusters are found by doing kmeans(X,3) for e.g. 3 clusters
+    %X=dailymaxwbtcentralday';
+    X=dailymaxwbtcdanom';
+    for i=2:10
+        idx=kmeans(X,i);
+        figure(i+20);
+        silhouette(X,idx);
+    end
+    %For X=dailymaxwbtcentralday, 3 clusters looks like the best
+    %For X=dailymaxwbtcdanom, 2 or 3 clusters are both reasonably appropriate
+    idx=kmeans(X,3);
+    
+    %Whether and how to visualize previous matrix and the k-means clustering more generally???
+end
+
+
+
+%Save key variables into .mat file
+if fullrun==1
+    save(strcat(savedvardir,'analyzenycdatahighpct',num2str(highpct*1000),'su',num2str(numstnsthisloop)),'integTprctiles',...
+    'regTprctiles','reghwdaysbyT','reghwbyTstarts','numreghwsbyT','hwbyTstarthours','Xmatrix','idx','maxhwlength');
+end
+if makehwseverityscatterplot==1;save(strcat(savedvardir,'analyzenycdatahighpct',num2str(highpct*1000),'su',num2str(numstnsthisloop)),...
+        'veryvslessmoisthws','listofhws','hwmoistdistn','-append');end
+if calchwseverityscores==1;save(strcat(savedvardir,'analyzenycdatahighpct',num2str(highpct*1000),'su',num2str(numstnsthisloop)),...
+        'scorescomptotalhw','scorescompbperhwavgm1','scorescompxperhwavgm1','scorescompnperhwavgm1','-append');end
+if calchwavgtwbt==1;save(strcat(savedvardir,'analyzenycdatahighpct',num2str(highpct*1000),'su',num2str(numstnsthisloop)),...
+        'scorescompbperhwavgm2','scorescompxperhwavgm2','scorescompnperhwavgm2','-append');end
+
     
